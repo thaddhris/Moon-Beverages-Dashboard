@@ -1,65 +1,152 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { DEFAULT_PARAMS, DEFAULT_SETTINGS, ParamSpec } from "../lib/config";
+import { Reading, NOW_TS } from "../lib/mockData";
+import { Header } from "../components/Header";
+import { RealtimeView } from "../components/RealtimeView";
+import { FormView } from "../components/FormView";
+import { SettingsSheet } from "../components/SettingsSheet";
+import { ParamDetailDrawer } from "../components/ParamDetailDrawer";
+import { DEFAULT_RANGE, TimeRange } from "../components/TimePicker";
+import { exchangeSSOToken } from "../lib/iosense/auth";
+import {
+  DEVICE_ID,
+  SensorMap,
+  autoMapSensors,
+  fetchDeviceMeta,
+  fetchReadings,
+} from "../lib/iosense/dataService";
+
+type View = "realtime" | "form";
+const DAY_MS = 24 * 3600 * 1000;
+
+export default function Page() {
+  const [view, setView] = useState<View>("realtime");
+  const [timeRange, setTimeRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [drillKey, setDrillKey] = useState<string | null>(null);
+  const [params, setParams] = useState<ParamSpec[]>(DEFAULT_PARAMS);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+
+  // IOsense state
+  const [sensorMap, setSensorMap] = useState<SensorMap>({});
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [dataLoading, setDataLoading] = useState(false);
+
+  // Step 1: Auth + device metadata on mount
+  useEffect(() => {
+    async function init() {
+      try {
+        const auth = await exchangeSSOToken();
+        if (!auth) return;
+        const meta = await fetchDeviceMeta(DEVICE_ID);
+        const map = autoMapSensors(meta.sensors);
+        setSensorMap(map);
+      } catch (err) {
+        console.error("Init error:", err);
+      }
+    }
+    init();
+  }, []);
+
+  // Step 2: Fetch all rows once after sensorMap is ready.
+  // Views filter client-side so the Overview can be locked to 7d while
+  // the QC Log and drawer honour their own ranges.
+  const loadData = useCallback(async () => {
+    if (Object.keys(sensorMap).length === 0) return;
+    setDataLoading(true);
+    try {
+      const data = await fetchReadings(sensorMap);
+      setReadings(data);
+    } catch (err) {
+      console.error("Fetch error:", err);
+    } finally {
+      setDataLoading(false);
+    }
+  }, [sensorMap]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // QC Log honours the top-level time picker
+  const filteredReadings = useMemo(
+    () => readings.filter((r) => r.ts >= timeRange.startTs && r.ts <= timeRange.endTs),
+    [readings, timeRange]
+  );
+
+  // Overview cards are always the last 7 days ending now
+  const last7Readings = useMemo(() => {
+    const end = NOW_TS;
+    const start = end - 7 * DAY_MS;
+    return readings.filter((r) => r.ts >= start && r.ts <= end);
+  }, [readings]);
+
+  const customized = useMemo(
+    () =>
+      JSON.stringify(params) !== JSON.stringify(DEFAULT_PARAMS) ||
+      JSON.stringify(settings) !== JSON.stringify(DEFAULT_SETTINGS),
+    [params, settings]
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "#f8fafc" }}>
+      <Header
+        view={view}
+        onView={setView}
+        timeRange={timeRange}
+        onTimeRange={setTimeRange}
+        onOpenSettings={() => setSettingsOpen(true)}
+        customized={customized}
+      />
+
+      {dataLoading && (
+        <div style={{ position: "fixed", top: 64, right: 20, zIndex: 50, background: "#1e293b", color: "#fff", fontSize: 12, padding: "5px 12px", borderRadius: 20, opacity: 0.8 }}>
+          Loading…
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+      )}
+
+      <main style={{ flex: 1 }}>
+        {view === "realtime" && (
+          <RealtimeView
+            params={params}
+            readings={last7Readings}
+            bufferPct={settings.warningBufferPct}
+            driftWindow={settings.driftWindowN}
+            driftProject={settings.driftProjectionM}
+            onSelectParam={setDrillKey}
+          />
+        )}
+        {view === "form" && (
+          <FormView
+            params={params}
+            readings={filteredReadings}
+            timeRange={timeRange}
+            bufferPct={settings.warningBufferPct}
+          />
+        )}
       </main>
+
+      <SettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        params={params}
+        settings={settings}
+        onSave={(p, s) => {
+          setParams(p);
+          setSettings(s);
+          setSettingsOpen(false);
+        }}
+      />
+      <ParamDetailDrawer
+        paramKey={drillKey}
+        params={params}
+        readings={readings}
+        onClose={() => setDrillKey(null)}
+      />
+
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>
     </div>
   );
 }
