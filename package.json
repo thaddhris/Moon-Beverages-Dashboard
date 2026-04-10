@@ -1,0 +1,12 @@
+{
+  "name": "moon-beverages-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Root wrapper — delegates install/build to ./frontend and mirrors the static export to ./out for the deployer.",
+  "scripts": {
+    "postinstall": "cd frontend && npm install --force",
+    "build": "cd frontend && npm run build && rm -rf ../out && cp -r out ../out",
+    "export": "echo 'static export already produced by build'",
+    "start": "cd frontend && npm run start"
+  }
+}

@@ -41,16 +41,18 @@ export async function exchangeSSOToken(): Promise<AuthResult | null> {
     return { token: bearer, organisation: "", userId: "" };
   }
 
-  // Otherwise treat as one-time SSO token and exchange it via proxy
-  const res = await fetch("/api/iosense", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      path: `/retrieve-sso-token/${rawToken}`,
+  // Otherwise treat as one-time SSO token and exchange it directly
+  const res = await fetch(
+    `https://connector.iosense.io/api/retrieve-sso-token/${rawToken}`,
+    {
       method: "GET",
-      headers: { organisation: "https://iosense.io" },
-    }),
-  });
+      headers: {
+        "Content-Type": "application/json",
+        "ngsw-bypass": "true",
+        organisation: "https://iosense.io",
+      },
+    }
+  );
 
   if (!res.ok) throw new Error(`SSO exchange failed: ${res.status}`);
   const data = await res.json();
