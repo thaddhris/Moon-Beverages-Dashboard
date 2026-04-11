@@ -21,8 +21,9 @@ function mulberry32(seed: number) {
   };
 }
 
-// Fixed anchor — 2026-04-10 12:00 UTC (matches current project date)
-export const NOW_TS = Date.UTC(2026, 3, 10, 12, 0, 0);
+// Current time — computed at module load. Real IOsense data is live, so we
+// anchor all "last N days" filters to the actual wall clock.
+export const NOW_TS = Date.now();
 const DAY_MS = 24 * 3600 * 1000;
 const SLOT_HOURS = [0, 4, 8, 12, 16, 20]; // UTC hours per day for 4h readings
 

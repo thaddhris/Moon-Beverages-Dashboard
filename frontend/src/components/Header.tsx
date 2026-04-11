@@ -52,9 +52,9 @@ export function Header({ view, onView, timeRange, onTimeRange, onOpenSettings, c
           </nav>
         </div>
 
-        {/* Right: time picker + settings + live dot */}
+        {/* Right: time picker (QC Log only) + settings + live dot */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <TimePicker value={timeRange} onChange={onTimeRange} />
+          {view === "form" && <TimePicker value={timeRange} onChange={onTimeRange} />}
           <button
             onClick={onOpenSettings}
             title="Settings"

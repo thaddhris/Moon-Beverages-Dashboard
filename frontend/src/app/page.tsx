@@ -124,6 +124,7 @@ export default function Page() {
             readings={filteredReadings}
             timeRange={timeRange}
             bufferPct={settings.warningBufferPct}
+            onSelectParam={setDrillKey}
           />
         )}
       </main>

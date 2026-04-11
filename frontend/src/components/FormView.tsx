@@ -10,6 +10,7 @@ interface Props {
   readings: Reading[];
   timeRange: TimeRange;
   bufferPct: number;
+  onSelectParam?: (key: string) => void;
 }
 
 const SLOT_HOURS = [0, 4, 8, 12, 16, 20];
@@ -110,11 +111,34 @@ const STICKY_COL_1 = { position: "sticky" as const, left: 0, zIndex: 15 };
 const STICKY_COL_2 = { position: "sticky" as const, left: 200, zIndex: 15 };
 const STICKY_COL_3 = { position: "sticky" as const, left: 272, zIndex: 15 };
 
-export function FormView({ params, readings, timeRange, bufferPct }: Props) {
+export function FormView({ params, readings, timeRange, bufferPct, onSelectParam }: Props) {
   const days = useMemo(() => getDays(timeRange.startTs, timeRange.endTs), [timeRange]);
   const totalSlotCols = days.length * SLOT_HOURS.length;
   const hourlyParams = params.filter((p) => p.frequency === "4h");
   const dailyParams = params.filter((p) => p.frequency === "daily");
+
+  // For every (day, slot) pair, find the nearest reading within tolerance
+  // and use its actual timestamp as the column label. This replaces the
+  // hardcoded 00:00 / 04:00 / … slot labels with the real log time.
+  const slotActualTimes = useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const dayTs of days) {
+      for (const h of SLOT_HOURS) {
+        const slotTs = dayTs + h * 3600 * 1000;
+        let best: Reading | null = null;
+        let bestDiff = TOLERANCE_MS;
+        for (const r of readings) {
+          const diff = Math.abs(r.ts - slotTs);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            best = r;
+          }
+        }
+        map[`${dayTs}-${h}`] = best ? best.ts : null;
+      }
+    }
+    return map;
+  }, [days, readings]);
 
   const sensoryRows = [
     { key: "appearance", label: "Appearance", spec: "Clear" },
@@ -203,20 +227,35 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
                 })}
               </tr>
 
-              {/* ── Row 2: Time slots ── */}
+              {/* ── Row 2: Time slots — actual log time when available ── */}
               <tr>
                 <th style={{ ...STICKY_COL_1, background: headerBg, border: cellBorder }} />
                 <th style={{ ...STICKY_COL_2, background: headerBg, border: cellBorder }} />
                 <th style={{ ...STICKY_COL_3, background: headerBg, border: cellBorder }} />
-                {days.flatMap((_, di) =>
-                  SLOT_HOURS.map((h, si) => (
-                    <th
-                      key={`${di}-${si}`}
-                      style={{ border: cellBorder, padding: "5px 2px", textAlign: "center", fontSize: 10, fontWeight: 400, color: "#94a3b8", background: headerBg, whiteSpace: "nowrap" }}
-                    >
-                      {String(h).padStart(2, "0")}:00
-                    </th>
-                  ))
+                {days.flatMap((dayTs, di) =>
+                  SLOT_HOURS.map((h, si) => {
+                    const actualTs = slotActualTimes[`${dayTs}-${h}`];
+                    const nominal = `${String(h).padStart(2, "0")}:00`;
+                    const label = actualTs !== null ? fmtTime(actualTs) : nominal;
+                    return (
+                      <th
+                        key={`${di}-${si}`}
+                        title={actualTs !== null ? `Logged at ${label}` : `Scheduled slot ${nominal}`}
+                        style={{
+                          border: cellBorder,
+                          padding: "5px 2px",
+                          textAlign: "center",
+                          fontSize: 10,
+                          fontWeight: actualTs !== null ? 500 : 400,
+                          color: actualTs !== null ? "#475569" : "#cbd5e1",
+                          background: headerBg,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {label}
+                      </th>
+                    );
+                  })
                 )}
               </tr>
             </thead>
@@ -262,7 +301,9 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
               <GroupRow label="Physical & Chemical · 4-Hourly" colSpan={3 + totalSlotCols} />
               {hourlyParams.map((p) => (
                 <tr key={p.key}>
-                  <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: "7px 14px", fontWeight: 500, color: "#1e293b" }}>{p.label}</td>
+                  <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: 0, fontWeight: 500, color: "#1e293b" }}>
+                    <ParamLabelCell label={p.label} onClick={onSelectParam ? () => onSelectParam(p.key) : undefined} />
+                  </td>
                   <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>4 Hrs</td>
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder, padding: "7px 10px", textAlign: "center", color: "#64748b", fontSize: 11 }}>{p.specDisplay}</td>
                   {days.flatMap((dayTs, di) =>
@@ -303,7 +344,9 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
               <GroupRow label="Chemical · Daily" colSpan={3 + totalSlotCols} />
               {dailyParams.map((p) => (
                 <tr key={p.key}>
-                  <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: "7px 14px", fontWeight: 500, color: "#1e293b" }}>{p.label}</td>
+                  <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: 0, fontWeight: 500, color: "#1e293b" }}>
+                    <ParamLabelCell label={p.label} onClick={onSelectParam ? () => onSelectParam(p.key) : undefined} />
+                  </td>
                   <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>Daily</td>
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder, padding: "7px 10px", textAlign: "center", color: "#64748b", fontSize: 11 }}>{p.specDisplay}</td>
                   {days.map((dayTs, di) => {
@@ -341,7 +384,9 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
                 </tr>
               ))}
 
-              {/* ── Footer rows (D171 Remarks, D172 QA Executive, D173 Team Leader) ── */}
+              {/* ── Footer rows (D171 Remarks, D172 QA Executive, D173 Team Leader) ─
+                   Each 4-hour slot gets its own value, matched to the same reading
+                   that populated the parameter columns above. ── */}
               {([
                 { label: "Remarks",      field: "remarks"     as const, light: true },
                 { label: "QA Executive", field: "qaExecutive" as const, light: false },
@@ -353,35 +398,46 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
                   </td>
                   <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder }} />
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder }} />
-                  {days.map((dayTs, di) => {
-                    const dayEnd = dayTs + DAY_MS;
-                    // First row of that day with a value for this field
-                    const r = readings.find(
-                      (r) => r.ts >= dayTs && r.ts < dayEnd && (r as any)[field]
-                    );
-                    const val = r ? ((r as any)[field] as string) : "";
-                    return (
-                      <td
-                        key={di}
-                        colSpan={SLOT_HOURS.length}
-                        title={val}
-                        style={{
-                          border: cellBorder,
-                          padding: "10px 10px",
-                          textAlign: "center",
-                          background: light ? "#fafbfc" : "white",
-                          color: "#475569",
-                          fontSize: 11,
-                          maxWidth: SLOT_HOURS.length * 72,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {val || <span style={{ color: "#cbd5e1" }}>—</span>}
-                      </td>
-                    );
-                  })}
+                  {days.flatMap((dayTs, di) =>
+                    SLOT_HOURS.map((h, si) => {
+                      const slotTs = dayTs + h * 3600 * 1000;
+                      const isFuture = slotTs > NOW_TS;
+                      // Find the reading closest to this slot (within ±2.1h),
+                      // the same one used for the 4-hourly parameter columns.
+                      let best: Reading | null = null;
+                      let bestDiff = TOLERANCE_MS;
+                      if (!isFuture) {
+                        for (const r of readings) {
+                          const diff = Math.abs(r.ts - slotTs);
+                          if (diff < bestDiff) {
+                            bestDiff = diff;
+                            best = r;
+                          }
+                        }
+                      }
+                      const val = best ? ((best as any)[field] as string | undefined) : undefined;
+                      return (
+                        <td
+                          key={`${di}-${si}`}
+                          title={val || ""}
+                          style={{
+                            border: cellBorder,
+                            padding: "10px 6px",
+                            textAlign: "center",
+                            background: isFuture ? "#f8fafc" : (light ? "#fafbfc" : "white"),
+                            color: "#475569",
+                            fontSize: 11,
+                            maxWidth: 72,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {isFuture ? "" : val || <span style={{ color: "#cbd5e1" }}>—</span>}
+                        </td>
+                      );
+                    })
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -389,6 +445,45 @@ export function FormView({ params, readings, timeRange, bufferPct }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function ParamLabelCell({ label, onClick }: { label: string; onClick?: () => void }) {
+  if (!onClick) {
+    return <div style={{ padding: "7px 14px" }}>{label}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="View details"
+      style={{
+        all: "unset",
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "7px 14px",
+        cursor: "pointer",
+        fontWeight: 500,
+        color: "#1e293b",
+        fontSize: 12,
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = "#1d4ed8";
+        const arrow = e.currentTarget.querySelector("[data-arrow]") as HTMLElement | null;
+        if (arrow) arrow.style.opacity = "1";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = "#1e293b";
+        const arrow = e.currentTarget.querySelector("[data-arrow]") as HTMLElement | null;
+        if (arrow) arrow.style.opacity = "0";
+      }}
+    >
+      <span style={{ textDecoration: "underline", textDecorationColor: "#cbd5e1", textUnderlineOffset: 3 }}>{label}</span>
+      <span data-arrow style={{ opacity: 0, transition: "opacity 0.12s", fontSize: 11, color: "#1d4ed8" }}>→</span>
+    </button>
   );
 }
 

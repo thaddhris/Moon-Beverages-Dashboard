@@ -58,10 +58,10 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
             <div className="text-[12px] text-[var(--ink-2)] mt-0.5">Last sample {timeAgo(lastTs)}</div>
           </div>
         </div>
-        <div className="flex items-center gap-10 text-[13px] tnum">
-          <Counter label="Out of Specification" value={counts.breach} color={counts.breach > 0 ? "var(--breach)" : "var(--ink-2)"} />
-          <Counter label="At Risk" value={counts.warn} color={counts.warn > 0 ? "var(--warn)" : "var(--ink-2)"} />
-          <Counter label="In Control" value={counts.ok} color="var(--ink-2)" />
+        <div className="flex items-center gap-2">
+          <Counter label="Out of Specification" value={counts.breach} accent="var(--breach)" active={counts.breach > 0} />
+          <Counter label="At Risk"              value={counts.warn}   accent="var(--warn)"   active={counts.warn > 0} />
+          <Counter label="In Control"           value={counts.ok}     accent="var(--ok)"     active={counts.ok > 0} />
         </div>
       </div>
 
@@ -71,7 +71,9 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
           const l = latest[p.key];
           const status = statusFor(l?.value, p, bufferPct);
           const fullSeries = seriesFor(readings, p.key as any);
-          const series = fullSeries.slice(-20);
+          // Sparkline = every point from the last 7 days ending now
+          const weekStart = NOW_TS - 7 * 24 * 3600 * 1000;
+          const series = fullSeries.filter((d) => d.ts >= weekStart && d.ts <= NOW_TS);
           const avg = fullSeries.length
             ? fullSeries.reduce((s, d) => s + d.v, 0) / fullSeries.length
             : null;
@@ -90,6 +92,8 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
             legend: { enabled: false },
             xAxis: {
               type: "datetime",
+              min: weekStart,
+              max: NOW_TS,
               lineColor: "#e2e8f0",
               tickColor: "#e2e8f0",
               tickLength: 3,
@@ -98,10 +102,7 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
                 y: 12,
                 format: "{value:%d %b}",
               },
-              tickPositioner: function (this: any) {
-                const ext = this.getExtremes();
-                return [ext.dataMin, ext.dataMax];
-              },
+              tickPositions: [weekStart, NOW_TS],
             },
             yAxis: {
               min: yMin,
@@ -179,11 +180,42 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
   );
 }
 
-function Counter({ label, value, color }: { label: string; value: number; color: string }) {
+function Counter({
+  label,
+  value,
+  accent,
+  active,
+}: {
+  label: string;
+  value: number;
+  accent: string;
+  active: boolean;
+}) {
+  const textColor = active ? accent : "var(--ink-2)";
   return (
-    <div>
-      <div className="label">{label}</div>
-      <div className="text-[22px] mt-1 tnum" style={{ color }}>{value}</div>
+    <div
+      className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg"
+      style={{
+        background: active ? `color-mix(in srgb, ${accent} 8%, white)` : "#f5f5f7",
+        border: `1px solid ${active ? `color-mix(in srgb, ${accent} 25%, white)` : "var(--hairline)"}`,
+      }}
+    >
+      <span
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ background: active ? accent : "#cbd5e1" }}
+      />
+      <span
+        className="text-[18px] tnum leading-none font-medium"
+        style={{ color: textColor }}
+      >
+        {value}
+      </span>
+      <span
+        className="text-[11px] font-medium whitespace-nowrap"
+        style={{ color: active ? textColor : "var(--ink-2)" }}
+      >
+        {label}
+      </span>
     </div>
   );
 }

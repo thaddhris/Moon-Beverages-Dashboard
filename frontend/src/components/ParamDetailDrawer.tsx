@@ -166,7 +166,6 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
                     <th className="text-left px-3 py-2 font-normal">Time</th>
                     <th className="text-left px-3 py-2 font-normal">Value</th>
                     <th className="text-left px-3 py-2 font-normal">Operator</th>
-                    <th className="text-left px-3 py-2 font-normal">Shift</th>
                     <th className="text-left px-3 py-2 font-normal">Status</th>
                   </tr>
                 </thead>
@@ -180,7 +179,6 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
                           {s.v.toFixed(spec.decimals)} {spec.unit}
                         </td>
                         <td className="px-3 py-2">{s.operator}</td>
-                        <td className="px-3 py-2">{s.shift}</td>
                         <td className="px-3 py-2">
                           <span className="inline-flex items-center gap-1">
                             <span
