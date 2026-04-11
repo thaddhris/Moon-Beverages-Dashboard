@@ -8,7 +8,7 @@ import { RealtimeView } from "../components/RealtimeView";
 import { FormView } from "../components/FormView";
 import { SettingsSheet } from "../components/SettingsSheet";
 import { ParamDetailDrawer } from "../components/ParamDetailDrawer";
-import { DEFAULT_RANGE, TimeRange } from "../components/TimePicker";
+import { DEFAULT_RANGE, TimeRange, computePreset } from "../components/TimePicker";
 import { exchangeSSOToken } from "../lib/iosense/auth";
 import {
   DEVICE_ID,
@@ -19,11 +19,11 @@ import {
 } from "../lib/iosense/dataService";
 
 type View = "realtime" | "form";
-const DAY_MS = 24 * 3600 * 1000;
 
 export default function Page() {
   const [view, setView] = useState<View>("realtime");
   const [timeRange, setTimeRange] = useState<TimeRange>(DEFAULT_RANGE);
+  const [overviewRange, setOverviewRange] = useState<TimeRange>(() => computePreset("today", NOW_TS));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [drillKey, setDrillKey] = useState<string | null>(null);
   const [params, setParams] = useState<ParamSpec[]>(DEFAULT_PARAMS);
@@ -76,12 +76,11 @@ export default function Page() {
     [readings, timeRange]
   );
 
-  // Overview cards are always the last 7 days ending now
-  const last7Readings = useMemo(() => {
-    const end = NOW_TS;
-    const start = end - 7 * DAY_MS;
-    return readings.filter((r) => r.ts >= start && r.ts <= end);
-  }, [readings]);
+  // Overview cards honour the Overview periodicity dropdown
+  const overviewReadings = useMemo(
+    () => readings.filter((r) => r.ts >= overviewRange.startTs && r.ts <= overviewRange.endTs),
+    [readings, overviewRange]
+  );
 
   const customized = useMemo(
     () =>
@@ -111,7 +110,9 @@ export default function Page() {
         {view === "realtime" && (
           <RealtimeView
             params={params}
-            readings={last7Readings}
+            readings={overviewReadings}
+            range={overviewRange}
+            onRangeChange={setOverviewRange}
             bufferPct={settings.warningBufferPct}
             driftWindow={settings.driftWindowN}
             driftProject={settings.driftProjectionM}

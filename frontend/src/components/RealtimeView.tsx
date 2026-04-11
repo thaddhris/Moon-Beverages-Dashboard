@@ -1,13 +1,34 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { ParamSpec } from "../lib/config";
 import { Reading, latestPerParam, seriesFor, NOW_TS } from "../lib/mockData";
 import { statusFor, statusColor, isDrifting } from "../lib/status";
 import { Chart } from "./Chart";
+import { TimeRange, computePreset } from "./TimePicker";
+
+type OverviewPresetKey =
+  | "today"
+  | "yesterday"
+  | "currentWeek"
+  | "previousWeek"
+  | "currentMonth"
+  | "previousMonth";
+
+const OVERVIEW_PRESETS: { key: OverviewPresetKey; label: string }[] = [
+  { key: "today",         label: "Today" },
+  { key: "yesterday",     label: "Yesterday" },
+  { key: "currentWeek",   label: "This Week" },
+  { key: "previousWeek",  label: "Previous Week" },
+  { key: "currentMonth",  label: "This Month" },
+  { key: "previousMonth", label: "Previous Month" },
+];
 
 interface Props {
   params: ParamSpec[];
   readings: Reading[];
+  range: TimeRange;
+  onRangeChange: (r: TimeRange) => void;
   bufferPct: number;
   driftWindow: number;
   driftProject: number;
@@ -23,7 +44,16 @@ function timeAgo(ts: number): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export function RealtimeView({ params, readings, bufferPct, driftWindow, driftProject, onSelectParam }: Props) {
+export function RealtimeView({
+  params,
+  readings,
+  range,
+  onRangeChange,
+  bufferPct,
+  driftWindow,
+  driftProject,
+  onSelectParam,
+}: Props) {
   const latest = latestPerParam(readings);
 
   const counts = { ok: 0, warn: 0, breach: 0, stale: 0 };
@@ -65,15 +95,25 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
         </div>
       </div>
 
+      {/* Periodicity selector */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[11px] uppercase tracking-[0.08em] text-[var(--ink-2)] font-medium">
+          Parameters · {range.label}
+        </div>
+        <PeriodicityDropdown
+          current={range.label}
+          onSelect={(key) => onRangeChange(computePreset(key, NOW_TS))}
+        />
+      </div>
+
       {/* Parameter grid */}
       <div className="grid grid-cols-4 gap-3">
         {params.map((p) => {
           const l = latest[p.key];
           const status = statusFor(l?.value, p, bufferPct);
           const fullSeries = seriesFor(readings, p.key as any);
-          // Sparkline = every point from the last 7 days ending now
-          const weekStart = NOW_TS - 7 * 24 * 3600 * 1000;
-          const series = fullSeries.filter((d) => d.ts >= weekStart && d.ts <= NOW_TS);
+          // `readings` is already filtered to the selected range in page.tsx
+          const series = fullSeries;
           const avg = fullSeries.length
             ? fullSeries.reduce((s, d) => s + d.v, 0) / fullSeries.length
             : null;
@@ -92,8 +132,8 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
             legend: { enabled: false },
             xAxis: {
               type: "datetime",
-              min: weekStart,
-              max: NOW_TS,
+              min: range.startTs,
+              max: range.endTs,
               lineColor: "#e2e8f0",
               tickColor: "#e2e8f0",
               tickLength: 3,
@@ -102,7 +142,7 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
                 y: 12,
                 format: "{value:%d %b}",
               },
-              tickPositions: [weekStart, NOW_TS],
+              tickPositions: [range.startTs, range.endTs],
             },
             yAxis: {
               min: yMin,
@@ -176,6 +216,114 @@ export function RealtimeView({ params, readings, bufferPct, driftWindow, driftPr
           <div className="text-[11px] text-[var(--ink-2)]">Appearance · Odor · Taste</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PeriodicityDropdown({
+  current,
+  onSelect,
+}: {
+  current: string;
+  onSelect: (key: OverviewPresetKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 12px",
+          background: "white",
+          border: "1px solid #e2e8f0",
+          borderRadius: 6,
+          cursor: "pointer",
+          fontFamily: "inherit",
+          fontSize: 12,
+          color: "#0f172a",
+          height: 32,
+          minWidth: 160,
+          justifyContent: "space-between",
+        }}
+      >
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span style={{ fontWeight: 500 }}>{current}</span>
+        </span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            background: "white",
+            border: "1px solid #e2e8f0",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(15,23,42,0.1), 0 2px 6px rgba(15,23,42,0.05)",
+            zIndex: 40,
+            minWidth: 180,
+            padding: 4,
+          }}
+        >
+          {OVERVIEW_PRESETS.map((p) => {
+            const active = p.label === current;
+            return (
+              <button
+                key={p.key}
+                onClick={() => {
+                  onSelect(p.key);
+                  setOpen(false);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "8px 12px",
+                  textAlign: "left",
+                  background: active ? "#e0f2fe" : "transparent",
+                  border: "none",
+                  borderRadius: 5,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 13,
+                  color: active ? "#0369a1" : "#334155",
+                  fontWeight: active ? 600 : 400,
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) (e.currentTarget as HTMLElement).style.background = "#f1f5f9";
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) (e.currentTarget as HTMLElement).style.background = "transparent";
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
