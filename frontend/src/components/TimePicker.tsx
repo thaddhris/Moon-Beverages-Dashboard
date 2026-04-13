@@ -2,9 +2,22 @@
 
 import { useState, useRef, useEffect } from "react";
 import { NOW_TS } from "../lib/mockData";
+import {
+  startOfIstDay,
+  endOfIstDay,
+  startOfIstWeek,
+  startOfIstMonth,
+  endOfIstMonth,
+  startOfIstYear,
+  istDate,
+  fmtDateIST,
+  fmtTimeIST,
+  fmtDateShortIST,
+  DAY_MS,
+} from "../lib/ist";
 
 const HOUR = 3600000;
-const DAY = 24 * HOUR;
+const DAY = DAY_MS;
 
 export interface TimeRange {
   label: string;
@@ -34,109 +47,79 @@ const PRESETS_DEF = [
 type PresetKey = typeof PRESETS_DEF[number]["key"];
 
 /* ──────────────────────────────────────────────────────────────
-   Date helpers (all UTC)
+   Date helpers (all IST — UTC+05:30)
    ────────────────────────────────────────────────────────────── */
-
-function startOfUtcDay(ts: number): number {
-  const d = new Date(ts);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-function endOfUtcDay(ts: number): number { return startOfUtcDay(ts) + DAY - 60000; }
-function startOfUtcWeek(ts: number): number {
-  const d = new Date(startOfUtcDay(ts));
-  return d.getTime() - d.getUTCDay() * DAY; // Sunday as week start
-}
-function startOfUtcMonth(ts: number): number {
-  const d = new Date(ts);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-}
-function endOfUtcMonth(ts: number): number {
-  const d = new Date(ts);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 60000;
-}
-function startOfUtcYear(ts: number): number {
-  return Date.UTC(new Date(ts).getUTCFullYear(), 0, 1);
-}
 
 export function computePreset(key: PresetKey, now: number): TimeRange {
   const label = PRESETS_DEF.find((p) => p.key === key)!.label;
   switch (key) {
     case "today":
-      return { label, startTs: startOfUtcDay(now), endTs: endOfUtcDay(now) };
+      return { label, startTs: startOfIstDay(now), endTs: endOfIstDay(now) };
     case "yesterday": {
       const y = now - DAY;
-      return { label, startTs: startOfUtcDay(y), endTs: endOfUtcDay(y) };
+      return { label, startTs: startOfIstDay(y), endTs: endOfIstDay(y) };
     }
     case "currentWeek": {
-      // Sunday of the current week → today (never into the future)
-      const s = startOfUtcWeek(now);
-      return { label, startTs: s, endTs: endOfUtcDay(now) };
+      const s = startOfIstWeek(now);
+      return { label, startTs: s, endTs: endOfIstDay(now) };
     }
     case "previousWeek": {
-      const s = startOfUtcWeek(now) - 7 * DAY;
-      return { label, startTs: s, endTs: endOfUtcDay(s + 6 * DAY) };
+      const s = startOfIstWeek(now) - 7 * DAY;
+      return { label, startTs: s, endTs: endOfIstDay(s + 6 * DAY) };
     }
     case "previous7Days":
-      return { label, startTs: startOfUtcDay(now - 7 * DAY), endTs: endOfUtcDay(now) };
+      return { label, startTs: startOfIstDay(now - 7 * DAY), endTs: endOfIstDay(now) };
     case "currentMonth":
-      // 1st of the month → today (never into the future)
-      return { label, startTs: startOfUtcMonth(now), endTs: endOfUtcDay(now) };
+      return { label, startTs: startOfIstMonth(now), endTs: endOfIstDay(now) };
     case "previousMonth": {
-      const d = new Date(now);
-      return {
-        label,
-        startTs: Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1),
-        endTs: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - 60000,
-      };
+      const d = istDate(now);
+      const prevMonthStart = startOfIstMonth(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 15)
+      );
+      return { label, startTs: prevMonthStart, endTs: endOfIstMonth(prevMonthStart) };
     }
     case "previous3Months": {
-      const d = new Date(now);
-      const s = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 3, d.getUTCDate());
-      return { label, startTs: startOfUtcDay(s), endTs: endOfUtcDay(now) };
+      const d = istDate(now);
+      const s = startOfIstDay(
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 3, d.getUTCDate()) - 5.5 * 3600000
+      );
+      return { label, startTs: s, endTs: endOfIstDay(now) };
     }
     case "previous12Months": {
-      const d = new Date(now);
-      const s = Date.UTC(d.getUTCFullYear() - 1, d.getUTCMonth(), d.getUTCDate());
-      return { label, startTs: startOfUtcDay(s), endTs: endOfUtcDay(now) };
+      const d = istDate(now);
+      const s = startOfIstDay(
+        Date.UTC(d.getUTCFullYear() - 1, d.getUTCMonth(), d.getUTCDate()) - 5.5 * 3600000
+      );
+      return { label, startTs: s, endTs: endOfIstDay(now) };
     }
-    case "currentYear": {
-      // Jan 1 → today (never into the future)
-      const y = new Date(now).getUTCFullYear();
-      return { label, startTs: Date.UTC(y, 0, 1), endTs: endOfUtcDay(now) };
-    }
+    case "currentYear":
+      return { label, startTs: startOfIstYear(now), endTs: endOfIstDay(now) };
     case "previousYear": {
-      const y = new Date(now).getUTCFullYear() - 1;
-      return { label, startTs: Date.UTC(y, 0, 1), endTs: Date.UTC(y + 1, 0, 1) - 60000 };
+      const y = istDate(now).getUTCFullYear() - 1;
+      return {
+        label,
+        startTs: startOfIstYear(Date.UTC(y, 6, 1)),
+        endTs: endOfIstDay(startOfIstYear(now) - DAY),
+      };
     }
     case "custom":
-      return { label: "Custom", startTs: startOfUtcDay(now - 7 * DAY), endTs: endOfUtcDay(now) };
+      return { label: "Custom", startTs: startOfIstDay(now - 7 * DAY), endTs: endOfIstDay(now) };
   }
 }
 
 export const DEFAULT_RANGE: TimeRange = computePreset("previous7Days", NOW_TS);
 
 /* ──────────────────────────────────────────────────────────────
-   Formatters
+   Formatters (all IST)
    ────────────────────────────────────────────────────────────── */
 
-const MONTH_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTH_UPPER = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 
-const pad2 = (n: number) => String(n).padStart(2, "0");
+function fmtDateSlash(ts: number): string { return fmtDateIST(ts); }
+function fmtDateShort(ts: number): string { return fmtDateShortIST(ts); }
+function fmtTime(ts: number): string { return fmtTimeIST(ts); }
 
-function fmtDateSlash(ts: number): string {
-  const d = new Date(ts);
-  return `${pad2(d.getUTCDate())}/${pad2(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
-}
-function fmtDateShort(ts: number): string {
-  const d = new Date(ts);
-  return `${pad2(d.getUTCDate())} ${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-}
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
-}
-function parseTime(s: string): number | null {
+function parseTimeInput(s: string): number | null {
   const m = s.match(/^(\d{1,2}):(\d{2})$/);
   if (!m) return null;
   const h = parseInt(m[1]);
@@ -164,7 +147,7 @@ export function TimePicker({ value, onChange }: Props) {
   const [draftEnd, setDraftEnd] = useState(value.endTs);
   const [startTimeStr, setStartTimeStr] = useState(fmtTime(value.startTs));
   const [endTimeStr, setEndTimeStr] = useState(fmtTime(value.endTs));
-  const [calMonth, setCalMonth] = useState(() => startOfUtcMonth(value.startTs));
+  const [calMonth, setCalMonth] = useState(() => startOfIstMonth(value.startTs));
   const [pickState, setPickState] = useState<"start" | "end">("start");
   const ref = useRef<HTMLDivElement>(null);
 
@@ -182,7 +165,7 @@ export function TimePicker({ value, onChange }: Props) {
       setDraftEnd(value.endTs);
       setStartTimeStr(fmtTime(value.startTs));
       setEndTimeStr(fmtTime(value.endTs));
-      setCalMonth(startOfUtcMonth(value.startTs));
+      setCalMonth(startOfIstMonth(value.startTs));
       const p = PRESETS_DEF.find((pd) => pd.label === value.label);
       setActivePreset((p?.key ?? "custom") as PresetKey);
       setPickState("start");
@@ -198,20 +181,20 @@ export function TimePicker({ value, onChange }: Props) {
     setDraftEnd(r.endTs);
     setStartTimeStr(fmtTime(r.startTs));
     setEndTimeStr(fmtTime(r.endTs));
-    setCalMonth(startOfUtcMonth(r.startTs));
+    setCalMonth(startOfIstMonth(r.startTs));
     setPickState("start");
   }
 
   function handleDayClick(dayTs: number) {
     setActivePreset("custom");
-    const sTime = parseTime(startTimeStr) ?? 0;
-    const eTime = parseTime(endTimeStr) ?? DAY - 60000;
+    const sTime = parseTimeInput(startTimeStr) ?? 0;
+    const eTime = parseTimeInput(endTimeStr) ?? DAY - 60000;
     if (pickState === "start") {
       setDraftStart(dayTs + sTime);
       setDraftEnd(dayTs + eTime); // temporary same-day end
       setPickState("end");
     } else {
-      if (dayTs < startOfUtcDay(draftStart)) {
+      if (dayTs < startOfIstDay(draftStart)) {
         // clicked earlier than current start → restart
         setDraftStart(dayTs + sTime);
         setDraftEnd(dayTs + eTime);
@@ -224,17 +207,18 @@ export function TimePicker({ value, onChange }: Props) {
   }
 
   function changeMonth(delta: number) {
-    const d = new Date(calMonth);
-    setCalMonth(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + delta, 1));
+    const d = istDate(calMonth);
+    const target = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + delta, 15);
+    setCalMonth(startOfIstMonth(target));
   }
 
   function handleApply() {
-    const sT = parseTime(startTimeStr);
-    const eT = parseTime(endTimeStr);
+    const sT = parseTimeInput(startTimeStr);
+    const eT = parseTimeInput(endTimeStr);
     let start = draftStart;
     let end = draftEnd;
-    if (sT !== null) start = startOfUtcDay(draftStart) + sT;
-    if (eT !== null) end = startOfUtcDay(draftEnd) + eT;
+    if (sT !== null) start = startOfIstDay(draftStart) + sT;
+    if (eT !== null) end = startOfIstDay(draftEnd) + eT;
     if (start > end) [start, end] = [end, start];
     const label =
       activePreset === "custom"
@@ -514,29 +498,31 @@ function Calendar({
   onMonthDelta: (d: number) => void;
   onDayClick: (dayTs: number) => void;
 }) {
-  const d = new Date(month);
-  const year = d.getUTCFullYear();
-  const mIdx = d.getUTCMonth();
+  // month is an IST-midnight epoch — use istDate to read year/month correctly
+  const id = istDate(month);
+  const year = id.getUTCFullYear();
+  const mIdx = id.getUTCMonth();
   const firstDayOfWeek = new Date(Date.UTC(year, mIdx, 1)).getUTCDay();
   const daysInMonth = new Date(Date.UTC(year, mIdx + 1, 0)).getUTCDate();
   const prevMonthDays = new Date(Date.UTC(year, mIdx, 0)).getUTCDate();
 
-  // Build 42 cells (6 weeks × 7 days)
+  // Build 42 cells (6 weeks × 7 days). Each cell's ts = IST midnight of that day.
+  const IST_OFF = 5.5 * 3600000;
   const cells: { ts: number; inMonth: boolean }[] = [];
   for (let i = firstDayOfWeek - 1; i >= 0; i--) {
-    cells.push({ ts: Date.UTC(year, mIdx - 1, prevMonthDays - i), inMonth: false });
+    cells.push({ ts: Date.UTC(year, mIdx - 1, prevMonthDays - i) - IST_OFF, inMonth: false });
   }
   for (let day = 1; day <= daysInMonth; day++) {
-    cells.push({ ts: Date.UTC(year, mIdx, day), inMonth: true });
+    cells.push({ ts: Date.UTC(year, mIdx, day) - IST_OFF, inMonth: true });
   }
   while (cells.length < 42) {
     const lastTs = cells[cells.length - 1].ts;
     cells.push({ ts: lastTs + DAY, inMonth: false });
   }
 
-  const startDay = startOfUtcDay(startDate);
-  const endDay = startOfUtcDay(endDate);
-  const today = startOfUtcDay(NOW_TS);
+  const startDay = startOfIstDay(startDate);
+  const endDay = startOfIstDay(endDate);
+  const today = startOfIstDay(NOW_TS);
 
   const navBtn: React.CSSProperties = {
     width: 26,
@@ -631,7 +617,7 @@ function Calendar({
                   if (!isEndpoint) (e.currentTarget as HTMLElement).style.background = "transparent";
                 }}
               >
-                {new Date(ts).getUTCDate()}
+                {istDate(ts).getUTCDate()}
               </button>
             </div>
           );

@@ -13,7 +13,9 @@ function applyTheme() {
   if (themed) return;
   themed = true;
 
+  // IST = UTC+05:30 → offset = -330 minutes (Highcharts convention: negative = east of UTC)
   Highcharts.setOptions({
+    time: { timezoneOffset: -330 },
     colors: ["#2563eb", "#dc2626", "#d97706", "#16a34a", "#7c3aed", "#0891b2", "#c026d3"],
 
     chart: {

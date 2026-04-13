@@ -5,6 +5,7 @@ import { ParamSpec } from "../lib/config";
 import { Reading, seriesFor, NOW_TS } from "../lib/mockData";
 import { Chart } from "./Chart";
 import { TimePicker, TimeRange, computePreset } from "./TimePicker";
+import { fmtDateTimeIST } from "../lib/ist";
 
 interface Props {
   paramKey: string | null;
@@ -62,7 +63,7 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
       formatter: function (this: any) {
         const d = new Date(this.x);
         const breach = this.y < spec.min || this.y > spec.max;
-        return `<div style="padding:4px"><div style="opacity:0.7;font-size:11px">${d.toUTCString().slice(5, 22)}</div><div style="font-size:14px;font-weight:500;color:${breach ? "#ff453a" : "#fff"}">${this.y.toFixed(spec.decimals)} ${spec.unit}</div>${breach ? '<div style="font-size:10px;color:#ff453a">OUT OF SPECIFICATION</div>' : ""}</div>`;
+        return `<div style="padding:4px"><div style="opacity:0.7;font-size:11px">${fmtDateTimeIST(this.x)}</div><div style="font-size:14px;font-weight:500;color:${breach ? "#ff453a" : "#fff"}">${this.y.toFixed(spec.decimals)} ${spec.unit}</div>${breach ? '<div style="font-size:10px;color:#ff453a">OUT OF SPECIFICATION</div>' : ""}</div>`;
       },
     },
     series: [
@@ -174,7 +175,7 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
                     const breach = s.v < spec.min || s.v > spec.max;
                     return (
                       <tr key={i} className="border-t border-[var(--hairline)]">
-                        <td className="px-3 py-2">{new Date(s.ts).toUTCString().slice(5, 22)}</td>
+                        <td className="px-3 py-2">{fmtDateTimeIST(s.ts)}</td>
                         <td className="px-3 py-2" style={{ color: breach ? "var(--breach)" : undefined }}>
                           {s.v.toFixed(spec.decimals)} {spec.unit}
                         </td>

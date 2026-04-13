@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ParamSpec } from "../lib/config";
 import { Reading, NOW_TS } from "../lib/mockData";
 import { TimeRange } from "./TimePicker";
+import { fmtDateIST, fmtTimeIST, startOfIstDay, DAY_MS as IST_DAY_MS } from "../lib/ist";
 
 interface Props {
   params: ParamSpec[];
@@ -13,63 +14,21 @@ interface Props {
   onSelectParam?: (key: string) => void;
 }
 
-const SLOT_HOURS = [0, 4, 8, 12, 16, 20];
-const DAY_MS = 24 * 60 * 60 * 1000;
-const TOLERANCE_MS = 2.1 * 3600 * 1000;
-
-interface SlotReading {
-  v: number;
-  ts: number;
-  operator: string;
-  shift: string;
-}
+const DAY_MS = IST_DAY_MS;
+const COL_W = 82;
 
 function getDays(startTs: number, endTs: number): number[] {
-  const startDay = Math.floor(startTs / DAY_MS) * DAY_MS;
-  const endDay = Math.floor(endTs / DAY_MS) * DAY_MS;
+  const startDay = startOfIstDay(startTs);
+  const endDay = startOfIstDay(endTs);
   const n = Math.max(1, Math.round((endDay - startDay) / DAY_MS) + 1);
-  // Newest first: today, yesterday, day before, ...
   return Array.from({ length: n }, (_, i) => endDay - i * DAY_MS);
 }
 
-function findSlotReading(readings: Reading[], key: string, slotTs: number): SlotReading | null {
-  let best: SlotReading | null = null;
-  let bestDiff = TOLERANCE_MS;
-  for (const r of readings) {
-    const diff = Math.abs(r.ts - slotTs);
-    if (diff < bestDiff) {
-      const v = (r.values as any)[key];
-      if (v !== undefined) {
-        bestDiff = diff;
-        best = { v, ts: r.ts, operator: r.operator, shift: r.shift };
-      }
-    }
-  }
-  return best;
-}
-
-function findDailyReading(readings: Reading[], key: string, dayStart: number): SlotReading | null {
-  const dayEnd = dayStart + DAY_MS;
-  for (const r of readings) {
-    if (r.ts >= dayStart && r.ts < dayEnd) {
-      const v = (r.values as any)[key];
-      if (v !== undefined) return { v, ts: r.ts, operator: r.operator, shift: r.shift };
-    }
-  }
-  return null;
-}
-
-function findSensoryReading(readings: Reading[], slotTs: number): Reading | null {
-  let best: Reading | null = null;
-  let bestDiff = TOLERANCE_MS;
-  for (const r of readings) {
-    const diff = Math.abs(r.ts - slotTs);
-    if (diff < bestDiff) { bestDiff = diff; best = r; }
-  }
-  return best;
-}
-
-function cellStatus(spec: ParamSpec, v: number | undefined, bufferPct: number): "ok" | "warn" | "breach" | "nil-ok" | "nil-breach" | "empty" {
+function cellStatus(
+  spec: ParamSpec,
+  v: number | undefined,
+  bufferPct: number
+): "ok" | "warn" | "breach" | "nil-ok" | "nil-breach" | "empty" {
   if (v === undefined) return "empty";
   if (spec.nilSpec) return v > spec.max ? "nil-breach" : "nil-ok";
   if (v < spec.min || v > spec.max) return "breach";
@@ -97,48 +56,36 @@ function fmtValue(spec: ParamSpec, v: number): string {
   return v.toFixed(spec.decimals);
 }
 
-function fmtDate(ts: number): string {
-  const d = new Date(ts);
-  return `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
-}
-
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-}
-
 const STICKY_COL_1 = { position: "sticky" as const, left: 0, zIndex: 15 };
 const STICKY_COL_2 = { position: "sticky" as const, left: 200, zIndex: 15 };
 const STICKY_COL_3 = { position: "sticky" as const, left: 272, zIndex: 15 };
 
 export function FormView({ params, readings, timeRange, bufferPct, onSelectParam }: Props) {
   const days = useMemo(() => getDays(timeRange.startTs, timeRange.endTs), [timeRange]);
-  const totalSlotCols = days.length * SLOT_HOURS.length;
   const hourlyParams = params.filter((p) => p.frequency === "4h");
   const dailyParams = params.filter((p) => p.frequency === "daily");
 
-  // For every (day, slot) pair, find the nearest reading within tolerance
-  // and use its actual timestamp as the column label. This replaces the
-  // hardcoded 00:00 / 04:00 / … slot labels with the real log time.
-  const slotActualTimes = useMemo(() => {
-    const map: Record<string, number | null> = {};
-    for (const dayTs of days) {
-      for (const h of SLOT_HOURS) {
-        const slotTs = dayTs + h * 3600 * 1000;
-        let best: Reading | null = null;
-        let bestDiff = TOLERANCE_MS;
-        for (const r of readings) {
-          const diff = Math.abs(r.ts - slotTs);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            best = r;
-          }
-        }
-        map[`${dayTs}-${h}`] = best ? best.ts : null;
-      }
+  // Build a map: dayTs → sorted array of readings for that day
+  const dayReadings = useMemo(() => {
+    const map = new Map<number, Reading[]>();
+    for (const dayTs of days) map.set(dayTs, []);
+    for (const r of readings) {
+      const dayTs = startOfIstDay(r.ts);
+      const arr = map.get(dayTs);
+      if (arr) arr.push(r);
     }
+    for (const arr of map.values()) arr.sort((a, b) => a.ts - b.ts);
     return map;
   }, [days, readings]);
+
+  // The max number of entries in any single day determines how many columns per day
+  const colsPerDay = useMemo(() => {
+    let max = 1;
+    for (const arr of dayReadings.values()) max = Math.max(max, arr.length);
+    return max;
+  }, [dayReadings]);
+
+  const totalCols = days.length * colsPerDay;
 
   const sensoryRows = [
     { key: "appearance", label: "Appearance", spec: "Clear" },
@@ -161,7 +108,7 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: "#64748b" }}>Date range</div>
             <div style={{ fontSize: 12, color: "#334155", fontVariantNumeric: "tabular-nums", marginTop: 1 }}>
-              {fmtDate(timeRange.startTs)} → {fmtDate(timeRange.endTs)}
+              {fmtDateIST(timeRange.startTs)} → {fmtDateIST(timeRange.endTs)}
             </div>
           </div>
         </div>
@@ -183,17 +130,18 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
 
         {/* Scrollable table */}
         <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: 12, fontVariantNumeric: "tabular-nums", tableLayout: "fixed", minWidth: 200 + 72 + 120 + totalSlotCols * 72 }}>
-            {/* Colgroup */}
+          <table style={{ borderCollapse: "collapse", fontSize: 12, fontVariantNumeric: "tabular-nums", tableLayout: "fixed", minWidth: 200 + 72 + 120 + totalCols * COL_W }}>
             <colgroup>
               <col style={{ width: 200 }} />
               <col style={{ width: 72 }} />
               <col style={{ width: 120 }} />
-              {days.flatMap((_, di) => SLOT_HOURS.map((_, si) => <col key={`${di}-${si}`} style={{ width: 72 }} />))}
+              {Array.from({ length: totalCols }, (_, i) => (
+                <col key={i} style={{ width: COL_W }} />
+              ))}
             </colgroup>
 
             <thead>
-              {/* ── Row 1: Day labels ── */}
+              {/* Row 1: Day labels */}
               <tr>
                 <th style={{ ...STICKY_COL_1, background: headerBg, border: cellBorder, padding: "8px 14px", textAlign: "left", fontWeight: 600, fontSize: 11, color: "#475569", letterSpacing: "0.04em" }}>
                   PARAMETER
@@ -205,11 +153,11 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
                   SPECIFICATION
                 </th>
                 {days.map((dayTs, di) => {
-                  const isToday = Math.floor(NOW_TS / DAY_MS) === Math.floor(dayTs / DAY_MS);
+                  const isToday = startOfIstDay(NOW_TS) === dayTs;
                   return (
                     <th
                       key={di}
-                      colSpan={SLOT_HOURS.length}
+                      colSpan={colsPerDay}
                       style={{
                         border: cellBorder,
                         padding: "8px 4px",
@@ -221,127 +169,123 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
                         borderBottom: isToday ? "2px solid #3b82f6" : cellBorder,
                       }}
                     >
-                      {fmtDate(dayTs)}{isToday ? " ★" : ""}
+                      {fmtDateIST(dayTs)}{isToday ? " ★" : ""}
                     </th>
                   );
                 })}
               </tr>
 
-              {/* ── Row 2: Time slots — actual log time when available ── */}
+              {/* Row 2: Actual reading timestamps */}
               <tr>
                 <th style={{ ...STICKY_COL_1, background: headerBg, border: cellBorder }} />
                 <th style={{ ...STICKY_COL_2, background: headerBg, border: cellBorder }} />
                 <th style={{ ...STICKY_COL_3, background: headerBg, border: cellBorder }} />
-                {days.flatMap((dayTs, di) =>
-                  SLOT_HOURS.map((h, si) => {
-                    const actualTs = slotActualTimes[`${dayTs}-${h}`];
-                    const nominal = `${String(h).padStart(2, "0")}:00`;
-                    const label = actualTs !== null ? fmtTime(actualTs) : nominal;
+                {days.flatMap((dayTs, di) => {
+                  const rArr = dayReadings.get(dayTs) ?? [];
+                  return Array.from({ length: colsPerDay }, (_, ci) => {
+                    const r = rArr[ci];
                     return (
                       <th
-                        key={`${di}-${si}`}
-                        title={actualTs !== null ? `Logged at ${label}` : `Scheduled slot ${nominal}`}
+                        key={`${di}-${ci}`}
+                        title={r ? `Logged at ${fmtTimeIST(r.ts)}` : ""}
                         style={{
                           border: cellBorder,
                           padding: "5px 2px",
                           textAlign: "center",
                           fontSize: 10,
-                          fontWeight: actualTs !== null ? 500 : 400,
-                          color: actualTs !== null ? "#475569" : "#cbd5e1",
+                          fontWeight: r ? 500 : 400,
+                          color: r ? "#475569" : "#cbd5e1",
                           background: headerBg,
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {label}
+                        {r ? fmtTimeIST(r.ts) : "—"}
                       </th>
                     );
-                  })
-                )}
+                  });
+                })}
               </tr>
             </thead>
 
             <tbody>
-              {/* ── Sensory group ── */}
-              <GroupRow label="Sensory" colSpan={3 + totalSlotCols} />
+              {/* Sensory group */}
+              <GroupRow label="Sensory" colSpan={3 + totalCols} />
               {sensoryRows.map((row) => (
-                <tr key={row.key} style={{ transition: "background 0.1s" }}>
+                <tr key={row.key}>
                   <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: "7px 14px", fontWeight: 500, color: "#1e293b" }}>{row.label}</td>
-                  <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>4 Hrs</td>
+                  <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>Per Entry</td>
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder, padding: "7px 10px", textAlign: "center", color: "#64748b" }}>{row.spec}</td>
-                  {days.flatMap((dayTs, di) =>
-                    SLOT_HOURS.map((h, si) => {
-                      const slotTs = dayTs + h * 3600 * 1000;
-                      const r = findSensoryReading(readings, slotTs);
+                  {days.flatMap((dayTs, di) => {
+                    const rArr = dayReadings.get(dayTs) ?? [];
+                    return Array.from({ length: colsPerDay }, (_, ci) => {
+                      const r = rArr[ci];
                       const val = r?.sensory[row.key as keyof typeof r.sensory];
                       const st = val ? sensoryStatus(val) : "empty";
                       const style = STATUS_STYLE[st];
-                      const isFuture = slotTs > NOW_TS;
                       return (
                         <td
-                          key={`${di}-${si}`}
-                          title={r ? `${fmtTime(r.ts)} · ${r.operator} · Shift ${r.shift}` : ""}
+                          key={`${di}-${ci}`}
+                          title={r && r.sensory[row.key as keyof typeof r.sensory] ? r.sensory[row.key as keyof typeof r.sensory] : ""}
                           style={{
                             border: cellBorder,
                             padding: "7px 3px",
                             textAlign: "center",
-                            background: isFuture ? "#f8fafc" : (val ? style.bg : "white"),
-                            color: isFuture ? "#cbd5e1" : style.text,
+                            background: r ? style.bg : "white",
+                            color: style.text,
                             fontSize: 11,
                           }}
                         >
-                          {isFuture ? "" : val ? <span style={{ fontWeight: 500 }}>{val.slice(0, 6)}</span> : <span style={{ color: "#cbd5e1" }}>—</span>}
+                          {val ? <span style={{ fontWeight: 500 }}>{val.slice(0, 6)}</span> : <span style={{ color: "#cbd5e1" }}>—</span>}
                         </td>
                       );
-                    })
-                  )}
+                    });
+                  })}
                 </tr>
               ))}
 
-              {/* ── 4-hourly params ── */}
-              <GroupRow label="Physical & Chemical · 4-Hourly" colSpan={3 + totalSlotCols} />
+              {/* 4-hourly / per-entry params */}
+              <GroupRow label="Physical & Chemical" colSpan={3 + totalCols} />
               {hourlyParams.map((p) => (
                 <tr key={p.key}>
                   <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: 0, fontWeight: 500, color: "#1e293b" }}>
                     <ParamLabelCell label={p.label} onClick={onSelectParam ? () => onSelectParam(p.key) : undefined} />
                   </td>
-                  <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>4 Hrs</td>
+                  <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>Per Entry</td>
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder, padding: "7px 10px", textAlign: "center", color: "#64748b", fontSize: 11 }}>{p.specDisplay}</td>
-                  {days.flatMap((dayTs, di) =>
-                    SLOT_HOURS.map((h, si) => {
-                      const slotTs = dayTs + h * 3600 * 1000;
-                      const isFuture = slotTs > NOW_TS;
-                      const reading = isFuture ? null : findSlotReading(readings, p.key, slotTs);
-                      const st = reading ? cellStatus(p, reading.v, bufferPct) : "empty";
+                  {days.flatMap((dayTs, di) => {
+                    const rArr = dayReadings.get(dayTs) ?? [];
+                    return Array.from({ length: colsPerDay }, (_, ci) => {
+                      const r = rArr[ci];
+                      const v = r ? (r.values as any)[p.key] as number | undefined : undefined;
+                      const st = cellStatus(p, v, bufferPct);
                       const style = STATUS_STYLE[st];
                       return (
                         <td
-                          key={`${di}-${si}`}
-                          title={reading ? `${fmtTime(reading.ts)} · ${reading.operator} · Shift ${reading.shift}\n${p.label}: ${reading.v.toFixed(p.decimals)} ${p.unit}` : ""}
+                          key={`${di}-${ci}`}
+                          title={v !== undefined ? `${v.toFixed(p.decimals)} ${p.unit}` : ""}
                           style={{
                             border: cellBorder,
                             padding: "7px 3px",
                             textAlign: "center",
-                            background: isFuture ? "#f8fafc" : (reading ? style.bg : "white"),
+                            background: v !== undefined ? style.bg : "white",
                           }}
                         >
-                          {isFuture ? (
-                            ""
-                          ) : reading ? (
+                          {v !== undefined ? (
                             <span style={{ fontWeight: 600, fontSize: 11, color: style.text }}>
-                              {fmtValue(p, reading.v)}
+                              {fmtValue(p, v)}
                             </span>
                           ) : (
                             <span style={{ color: "#cbd5e1", fontSize: 11 }}>—</span>
                           )}
                         </td>
                       );
-                    })
-                  )}
+                    });
+                  })}
                 </tr>
               ))}
 
-              {/* ── Daily params ── */}
-              <GroupRow label="Chemical · Daily" colSpan={3 + totalSlotCols} />
+              {/* Daily / chemical params */}
+              <GroupRow label="Chemical · Daily" colSpan={3 + totalCols} />
               {dailyParams.map((p) => (
                 <tr key={p.key}>
                   <td style={{ ...STICKY_COL_1, background: "white", border: cellBorder, padding: 0, fontWeight: 500, color: "#1e293b" }}>
@@ -350,29 +294,29 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
                   <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder, padding: "7px 6px", textAlign: "center", color: "#64748b" }}>Daily</td>
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder, padding: "7px 10px", textAlign: "center", color: "#64748b", fontSize: 11 }}>{p.specDisplay}</td>
                   {days.map((dayTs, di) => {
-                    const isFuture = dayTs + 8 * 3600 * 1000 > NOW_TS;
-                    const reading = isFuture ? null : findDailyReading(readings, p.key, dayTs);
-                    const st = reading ? cellStatus(p, reading.v, bufferPct) : "empty";
+                    const rArr = dayReadings.get(dayTs) ?? [];
+                    // For daily params, find the first reading that has a value
+                    const r = rArr.find((r) => (r.values as any)[p.key] !== undefined);
+                    const v = r ? (r.values as any)[p.key] as number | undefined : undefined;
+                    const st = cellStatus(p, v, bufferPct);
                     const style = STATUS_STYLE[st];
                     return (
                       <td
                         key={di}
-                        colSpan={SLOT_HOURS.length}
-                        title={reading ? `${fmtDate(reading.ts)} ${fmtTime(reading.ts)} · ${reading.operator} · Shift ${reading.shift}\n${p.label}: ${reading.v.toFixed(p.decimals)} ${p.unit}` : ""}
+                        colSpan={colsPerDay}
+                        title={v !== undefined ? `${v.toFixed(p.decimals)} ${p.unit}` : ""}
                         style={{
                           border: cellBorder,
                           padding: "7px 6px",
                           textAlign: "center",
-                          background: isFuture ? "#f8fafc" : (reading ? style.bg : "white"),
+                          background: v !== undefined ? style.bg : "white",
                         }}
                       >
-                        {isFuture ? (
-                          ""
-                        ) : reading ? (
+                        {v !== undefined ? (
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                             <span style={{ width: 6, height: 6, borderRadius: "50%", background: style.dot, flexShrink: 0 }} />
                             <span style={{ fontWeight: 600, fontSize: 12, color: style.text }}>
-                              {reading.v.toFixed(p.decimals)} <span style={{ fontWeight: 400, fontSize: 10, color: style.text, opacity: 0.7 }}>{p.unit}</span>
+                              {v.toFixed(p.decimals)} <span style={{ fontWeight: 400, fontSize: 10, color: style.text, opacity: 0.7 }}>{p.unit}</span>
                             </span>
                           </div>
                         ) : (
@@ -384,9 +328,7 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
                 </tr>
               ))}
 
-              {/* ── Footer rows (D171 Remarks, D172 QA Executive, D173 Team Leader) ─
-                   Each 4-hour slot gets its own value, matched to the same reading
-                   that populated the parameter columns above. ── */}
+              {/* Footer: Remarks, QA Executive, Team Leader — per entry */}
               {([
                 { label: "Remarks",      field: "remarks"     as const, light: true },
                 { label: "QA Executive", field: "qaExecutive" as const, light: false },
@@ -398,46 +340,33 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
                   </td>
                   <td style={{ ...STICKY_COL_2, background: "white", border: cellBorder }} />
                   <td style={{ ...STICKY_COL_3, background: "white", border: cellBorder }} />
-                  {days.flatMap((dayTs, di) =>
-                    SLOT_HOURS.map((h, si) => {
-                      const slotTs = dayTs + h * 3600 * 1000;
-                      const isFuture = slotTs > NOW_TS;
-                      // Find the reading closest to this slot (within ±2.1h),
-                      // the same one used for the 4-hourly parameter columns.
-                      let best: Reading | null = null;
-                      let bestDiff = TOLERANCE_MS;
-                      if (!isFuture) {
-                        for (const r of readings) {
-                          const diff = Math.abs(r.ts - slotTs);
-                          if (diff < bestDiff) {
-                            bestDiff = diff;
-                            best = r;
-                          }
-                        }
-                      }
-                      const val = best ? ((best as any)[field] as string | undefined) : undefined;
+                  {days.flatMap((dayTs, di) => {
+                    const rArr = dayReadings.get(dayTs) ?? [];
+                    return Array.from({ length: colsPerDay }, (_, ci) => {
+                      const r = rArr[ci];
+                      const val = r ? ((r as any)[field] as string | undefined) : undefined;
                       return (
                         <td
-                          key={`${di}-${si}`}
+                          key={`${di}-${ci}`}
                           title={val || ""}
                           style={{
                             border: cellBorder,
                             padding: "10px 6px",
                             textAlign: "center",
-                            background: isFuture ? "#f8fafc" : (light ? "#fafbfc" : "white"),
+                            background: light ? "#fafbfc" : "white",
                             color: "#475569",
                             fontSize: 11,
-                            maxWidth: 72,
+                            maxWidth: COL_W,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {isFuture ? "" : val || <span style={{ color: "#cbd5e1" }}>—</span>}
+                          {val || <span style={{ color: "#cbd5e1" }}>—</span>}
                         </td>
                       );
-                    })
-                  )}
+                    });
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -499,7 +428,6 @@ function GroupRow({ label, colSpan }: { label: string; colSpan: number }) {
           borderBottom: "1px solid #e2e8f0",
         }}
       >
-        {/* Sticky wrapper keeps the label pinned to the viewport as the table scrolls horizontally */}
         <div
           style={{
             position: "sticky",

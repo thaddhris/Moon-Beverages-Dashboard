@@ -68,22 +68,25 @@ export function parseTime(t: string | number): number {
   if (!t) return NaN;
 
   // YYYY-MM-DD HH:MM:SS  (actual format used by TREATED_WATER_COLA)
+  // Timestamps are IST (UTC+05:30) — the plant is in India.
   const ymd = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})$/.exec(t);
   if (ymd) {
-    return new Date(`${ymd[1]}-${ymd[2]}-${ymd[3]}T${ymd[4]}Z`).getTime();
+    return new Date(`${ymd[1]}-${ymd[2]}-${ymd[3]}T${ymd[4]}+05:30`).getTime();
   }
 
   // DD/MM/YYYY HH:MM:SS  (fallback — some rows may still use this)
   const dmy = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}:\d{2}:\d{2})$/.exec(t);
   if (dmy) {
-    return new Date(`${dmy[3]}-${dmy[2]}-${dmy[1]}T${dmy[4]}Z`).getTime();
+    return new Date(`${dmy[3]}-${dmy[2]}-${dmy[1]}T${dmy[4]}+05:30`).getTime();
   }
 
   return new Date(t).getTime();
 }
 
+import { istHours } from "../ist";
+
 function shiftFor(ts: number): "A" | "B" | "C" {
-  const h = new Date(ts).getUTCHours();
+  const h = istHours(ts);
   if (h >= 6 && h < 14) return "A";
   if (h >= 14 && h < 22) return "B";
   return "C";
@@ -135,10 +138,18 @@ export async function fetchReadings(_sensorMap: SensorMap): Promise<Reading[]> {
     page++;
   }
 
+  // Deduplicate by _id — pagination can return overlapping rows
+  const seen = new Set<string>();
+  const uniqueRows = allRows.filter((r) => {
+    if (seen.has(r._id)) return false;
+    seen.add(r._id);
+    return true;
+  });
+
   // Convert each row to a Reading
   const readings: Reading[] = [];
 
-  for (const row of allRows) {
+  for (const row of uniqueRows) {
     const d = row.data ?? {};
 
     // Timestamp from D0
@@ -176,5 +187,29 @@ export async function fetchReadings(_sensorMap: SensorMap): Promise<Reading[]> {
     });
   }
 
-  return readings;
+  // Merge readings that share the exact same timestamp.
+  // This happens when the CT03 table stores multiple rows for the same
+  // time slot (e.g. separate entries for sensory vs physical data).
+  const byTs = new Map<number, Reading>();
+  for (const r of readings) {
+    const existing = byTs.get(r.ts);
+    if (existing) {
+      Object.assign(existing.values, r.values);
+      if (r.remarks && !existing.remarks) existing.remarks = r.remarks;
+      if (r.qaExecutive && !existing.qaExecutive) existing.qaExecutive = r.qaExecutive;
+      if (r.teamLeader && !existing.teamLeader) existing.teamLeader = r.teamLeader;
+      if (r.operator && !existing.operator) existing.operator = r.operator;
+      existing.sensory = {
+        appearance: r.sensory.appearance !== "Clear" ? r.sensory.appearance : existing.sensory.appearance,
+        odor: r.sensory.odor !== "Normal" ? r.sensory.odor : existing.sensory.odor,
+        taste: r.sensory.taste !== "Normal" ? r.sensory.taste : existing.sensory.taste,
+      };
+    } else {
+      byTs.set(r.ts, r);
+    }
+  }
+
+  const merged = Array.from(byTs.values());
+  merged.sort((a, b) => a.ts - b.ts);
+  return merged;
 }
