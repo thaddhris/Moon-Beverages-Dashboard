@@ -5,7 +5,9 @@ import { ParamSpec } from "../lib/config";
 import { Reading, seriesFor, NOW_TS } from "../lib/mockData";
 import { Chart } from "./Chart";
 import { TimePicker, TimeRange, computePreset } from "./TimePicker";
-import { fmtDateTimeIST } from "../lib/ist";
+import { fmtDateTimeIST, fmtDateIST, startOfIstDay, DAY_MS } from "../lib/ist";
+import { controlLimits, capability, ratingColor } from "../lib/sixsigma";
+import { slotStatusForDay, SLOTS, SlotStatus } from "../lib/slots";
 
 interface Props {
   paramKey: string | null;
@@ -14,7 +16,6 @@ interface Props {
   onClose: () => void;
 }
 
-// Default drawer window: last 7 days ending now
 const DEFAULT_DRAWER_RANGE: TimeRange = computePreset("previous7Days", NOW_TS);
 
 export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props) {
@@ -26,7 +27,6 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
     return () => window.removeEventListener("keydown", handle);
   }, [onClose]);
 
-  // Reset the drawer's time range each time it opens with a new param
   useEffect(() => {
     if (paramKey) setDrawerRange(DEFAULT_DRAWER_RANGE);
   }, [paramKey]);
@@ -36,32 +36,57 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
     [readings, drawerRange]
   );
 
+  // Slot completion per day in the selected window — computed before any early
+  // return so React sees the same hook order on every render.
+  const dayBreakdown = useMemo(() => {
+    const startDay = startOfIstDay(drawerRange.startTs);
+    const endDay = startOfIstDay(drawerRange.endTs);
+    const out: { dayTs: number; slots: ReturnType<typeof slotStatusForDay> }[] = [];
+    for (let d = endDay; d >= startDay; d -= DAY_MS) {
+      out.push({ dayTs: d, slots: slotStatusForDay(d, filtered) });
+    }
+    return out;
+  }, [filtered, drawerRange]);
+
   if (!paramKey) return null;
   const spec = params.find((p) => p.key === paramKey);
   if (!spec) return null;
 
   const series = seriesFor(filtered, spec.key as any);
-  const breaches = series.filter((s) => s.v < spec.min || s.v > spec.max).length;
-  const minV = series.length ? Math.min(...series.map((s) => s.v)) : 0;
-  const maxV = series.length ? Math.max(...series.map((s) => s.v)) : 0;
-  const avgV = series.length ? series.reduce((a, b) => a + b.v, 0) / series.length : 0;
+  const values = series.map((s) => s.v);
+  const breaches = values.filter((v) => v < spec.min || v > spec.max).length;
+  const minV = values.length ? Math.min(...values) : 0;
+  const maxV = values.length ? Math.max(...values) : 0;
+  const avgV = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 
-  // Main trend chart
+  const limits = controlLimits(values);
+  const cap = capability(values, spec.min, spec.max);
+  const ratingC = ratingColor(cap.rating);
+
+  // Main trend chart — adds UCL/LCL dashed orange lines on top of spec limits
+  const trendPlotLines: any[] = [
+    { value: spec.min, color: "#ff3b30", dashStyle: "Dash", width: 1, label: { text: `LSL ${spec.min}`, align: "right", style: { color: "#ff3b30", fontSize: "10px" } } },
+    { value: spec.max, color: "#ff3b30", dashStyle: "Dash", width: 1, label: { text: `USL ${spec.max}`, align: "right", style: { color: "#ff3b30", fontSize: "10px" } } },
+  ];
+  if (values.length >= 2 && limits.sigma > 0) {
+    trendPlotLines.push(
+      { value: limits.ucl, color: "#f59e0b", dashStyle: "ShortDash", width: 1, label: { text: `UCL ${limits.ucl.toFixed(spec.decimals)}`, align: "left", style: { color: "#d97706", fontSize: "10px" } } },
+      { value: limits.lcl, color: "#f59e0b", dashStyle: "ShortDash", width: 1, label: { text: `LCL ${limits.lcl.toFixed(spec.decimals)}`, align: "left", style: { color: "#d97706", fontSize: "10px" } } },
+      { value: limits.mean, color: "#3b82f6", dashStyle: "Dot", width: 1, label: { text: `μ ${limits.mean.toFixed(spec.decimals)}`, align: "left", style: { color: "#2563eb", fontSize: "10px" } } },
+    );
+  }
+
   const trendOptions: any = {
-    chart: { type: "spline", height: 280 },
+    chart: { type: "spline", height: 300 },
     xAxis: { type: "datetime" },
     yAxis: {
       plotBands: [
         { from: spec.min, to: spec.max, color: "rgba(48,209,88,0.06)", label: { text: "Acceptable", style: { color: "#6e6e73", fontSize: "10px" } } },
       ],
-      plotLines: [
-        { value: spec.min, color: "#ff3b30", dashStyle: "Dash", width: 1 },
-        { value: spec.max, color: "#ff3b30", dashStyle: "Dash", width: 1 },
-      ],
+      plotLines: trendPlotLines,
     },
     tooltip: {
       formatter: function (this: any) {
-        const d = new Date(this.x);
         const breach = this.y < spec.min || this.y > spec.max;
         return `<div style="padding:4px"><div style="opacity:0.7;font-size:11px">${fmtDateTimeIST(this.x)}</div><div style="font-size:14px;font-weight:500;color:${breach ? "#ff453a" : "#fff"}">${this.y.toFixed(spec.decimals)} ${spec.unit}</div>${breach ? '<div style="font-size:10px;color:#ff453a">OUT OF SPECIFICATION</div>' : ""}</div>`;
       },
@@ -121,7 +146,7 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-[780px] bg-[var(--surface)] shadow-2xl flex flex-col">
+      <div className="absolute right-0 top-0 h-full w-[820px] bg-[var(--surface)] shadow-2xl flex flex-col">
         <div className="flex items-start justify-between px-8 py-5 border-b border-[var(--hairline)] gap-4">
           <div className="flex-shrink-0">
             <div className="label">Parameter detail</div>
@@ -148,16 +173,118 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
             <Stat label="Out of Specification" value={String(breaches)} unit="" tone={breaches > 0 ? "breach" : undefined} />
           </div>
 
+          {/* Six Sigma */}
           <div>
-            <div className="label mb-2">Trend · {drawerRange.label}</div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="label">Six Sigma · Process Capability</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: "3px 10px",
+                  borderRadius: 12,
+                  border: `1px solid ${ratingC.border}`,
+                  background: ratingC.bg,
+                  color: ratingC.fg,
+                }}
+              >
+                {cap.rating}
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              <Stat
+                label="UCL · μ+3σ"
+                value={limits.sigma > 0 ? limits.ucl.toFixed(spec.decimals) : "—"}
+                unit={spec.unit}
+              />
+              <Stat
+                label="LCL · μ−3σ"
+                value={limits.sigma > 0 ? limits.lcl.toFixed(spec.decimals) : "—"}
+                unit={spec.unit}
+              />
+              <Stat
+                label="Cp"
+                value={cap.cp !== null ? cap.cp.toFixed(2) : "—"}
+                unit=""
+                tooltip="Process potential: (USL − LSL) / (6σ)"
+              />
+              <Stat
+                label="Cpk"
+                value={cap.cpk !== null ? cap.cpk.toFixed(2) : "—"}
+                unit=""
+                tooltip="Centred capability: min((USL−μ)/3σ, (μ−LSL)/3σ)"
+                tone={
+                  cap.rating === "Inadequate" ? "breach" :
+                  cap.rating === "Marginal"   ? "warn"   : undefined
+                }
+              />
+            </div>
+            <div className="text-[11px] text-[var(--ink-2)] mt-2">
+              σ = {limits.sigma.toFixed(spec.decimals || 2)} {spec.unit} · n = {values.length}
+              {" · "}Rating: Excellent Cpk≥1.67, Adequate ≥1.33, Marginal ≥1.00
+            </div>
+          </div>
+
+          {/* Trend */}
+          <div>
+            <div className="label mb-2">Trend · {drawerRange.label} · with Control Limits</div>
             <Chart options={trendOptions} />
           </div>
 
+          {/* Slot completion */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="label">Slot Completion · {drawerRange.label}</div>
+              <div className="flex items-center gap-3 text-[10px] text-[var(--ink-2)]">
+                <LegendDot color="var(--ok)"     label="Filled" />
+                <LegendDot color="#3b82f6"       label="Multi" />
+                <LegendDot color="var(--breach)" label="Missed" />
+                <LegendDot color="#e2e8f0"       label="Future" />
+              </div>
+            </div>
+            <div className="border border-[var(--hairline)] rounded-lg overflow-hidden">
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                <table className="w-full text-[12px] tnum">
+                  <thead className="bg-[var(--bg)] text-[var(--ink-2)] sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-normal" style={{ width: 130 }}>Date</th>
+                      {SLOTS.map((s) => (
+                        <th key={s.label} className="text-center px-1 py-2 font-normal">{s.label}</th>
+                      ))}
+                      <th className="text-right px-3 py-2 font-normal" style={{ width: 64 }}>Filled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dayBreakdown.map(({ dayTs, slots }) => {
+                      const filled = slots.filter((s) => s.status === "filled" || s.status === "multi").length;
+                      const expected = slots.filter((s) => s.status !== "future").length;
+                      return (
+                        <tr key={dayTs} className="border-t border-[var(--hairline)]">
+                          <td className="px-3 py-2">{fmtDateIST(dayTs)}</td>
+                          {slots.map((s) => (
+                            <td key={s.slotIndex} className="text-center py-2">
+                              <SlotDot status={s.status} count={s.count} />
+                            </td>
+                          ))}
+                          <td className="text-right px-3 py-2 text-[var(--ink-2)]">
+                            {filled}/{expected}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Distribution */}
           <div>
             <div className="label mb-2">Distribution</div>
             <Chart options={distOptions} />
           </div>
 
+          {/* Recent readings */}
           <div>
             <div className="label mb-2">Recent readings</div>
             <div className="border border-[var(--hairline)] rounded-lg overflow-hidden">
@@ -202,14 +329,74 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
   );
 }
 
-function Stat({ label, value, unit, tone }: { label: string; value: string; unit: string; tone?: "breach" }) {
+function Stat({
+  label,
+  value,
+  unit,
+  tone,
+  tooltip,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  tone?: "breach" | "warn";
+  tooltip?: string;
+}) {
+  const color =
+    tone === "breach" ? "var(--breach)" :
+    tone === "warn"   ? "var(--warn)"   : undefined;
   return (
-    <div className="card px-4 py-3">
+    <div className="card px-4 py-3" title={tooltip}>
       <div className="label text-[10px]">{label}</div>
-      <div className="text-[18px] font-medium tnum mt-1" style={{ color: tone === "breach" ? "var(--breach)" : undefined }}>
+      <div className="text-[18px] font-medium tnum mt-1" style={{ color }}>
         {value}
       </div>
       {unit && <div className="text-[10px] text-[var(--ink-2)]">{unit}</div>}
     </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, display: "inline-block" }} />
+      {label}
+    </span>
+  );
+}
+
+function SlotDot({ status, count }: { status: SlotStatus; count: number }) {
+  const color =
+    status === "filled" ? "var(--ok)" :
+    status === "multi"  ? "#3b82f6"   :
+    status === "missed" ? "var(--breach)" : "#e2e8f0";
+  const title =
+    status === "filled" ? "1 submission" :
+    status === "multi"  ? `${count} submissions` :
+    status === "missed" ? "Missed — no submission" :
+    "Not yet due";
+  return (
+    <span
+      title={title}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        background: status === "future" ? color : `color-mix(in srgb, ${color} 20%, white)`,
+        border: `1.5px solid ${status === "future" ? "#cbd5e1" : color}`,
+        fontSize: 10,
+        fontWeight: 600,
+        color:
+          status === "future" ? "#94a3b8" :
+          status === "filled" ? "#166534" :
+          status === "multi"  ? "#1e3a8a" :
+          "#991b1b",
+      }}
+    >
+      {status === "missed" ? "×" : status === "future" ? "" : count}
+    </span>
   );
 }

@@ -111,7 +111,19 @@ interface TableResponse {
   };
 }
 
-export async function fetchReadings(_sensorMap: SensorMap): Promise<Reading[]> {
+// In-memory cache by deviceId so multiple tabs sharing a device don't
+// repeat the same paginated fetch.
+const readingsCache = new Map<string, Promise<Reading[]>>();
+
+export async function fetchReadings(_sensorMap: SensorMap, deviceId: string = DEVICE_ID): Promise<Reading[]> {
+  const cached = readingsCache.get(deviceId);
+  if (cached) return cached;
+  const p = fetchReadingsUncached(deviceId);
+  readingsCache.set(deviceId, p);
+  return p;
+}
+
+async function fetchReadingsUncached(deviceId: string): Promise<Reading[]> {
   // Paginate — fetch up to 500 rows per call.
   // We pull all rows and filter client-side (total ~2400, fine for a POC).
   const PAGE_SIZE = 500;
@@ -120,7 +132,7 @@ export async function fetchReadings(_sensorMap: SensorMap): Promise<Reading[]> {
 
   while (true) {
     const body = {
-      devID: DEVICE_ID,
+      devID: deviceId,
       page,
       limit: PAGE_SIZE,
       rawData: true, // required by the API validator

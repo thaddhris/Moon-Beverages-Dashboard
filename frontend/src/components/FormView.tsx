@@ -12,6 +12,8 @@ interface Props {
   timeRange: TimeRange;
   bufferPct: number;
   onSelectParam?: (key: string) => void;
+  waterLabel?: string;
+  waterSubtitle?: string;
 }
 
 const DAY_MS = IST_DAY_MS;
@@ -60,7 +62,7 @@ const STICKY_COL_1 = { position: "sticky" as const, left: 0, zIndex: 15 };
 const STICKY_COL_2 = { position: "sticky" as const, left: 200, zIndex: 15 };
 const STICKY_COL_3 = { position: "sticky" as const, left: 272, zIndex: 15 };
 
-export function FormView({ params, readings, timeRange, bufferPct, onSelectParam }: Props) {
+export function FormView({ params, readings, timeRange, bufferPct, onSelectParam, waterLabel, waterSubtitle }: Props) {
   const days = useMemo(() => getDays(timeRange.startTs, timeRange.endTs), [timeRange]);
   const hourlyParams = params.filter((p) => p.frequency === "4h");
   const dailyParams = params.filter((p) => p.frequency === "daily");
@@ -102,8 +104,12 @@ export function FormView({ params, readings, timeRange, bufferPct, onSelectParam
         {/* Sheet header */}
         <div style={{ borderBottom: cellBorder, padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fafbfc" }}>
           <div>
-            <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b", fontWeight: 500 }}>Moon Beverages · QC Log</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginTop: 2 }}>Treated Water Analysis — After 1 Micron</div>
+            <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "#64748b", fontWeight: 500 }}>
+              Moon Beverages · QC Log{waterLabel ? ` · ${waterLabel}` : ""}
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#0f172a", marginTop: 2 }}>
+              {waterSubtitle ?? "Treated Water Analysis — After 1 Micron"}
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 11, color: "#64748b" }}>Date range</div>

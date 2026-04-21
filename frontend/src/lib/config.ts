@@ -28,6 +28,10 @@ export interface ParamSpec {
   decimals: number;
   specDisplay: string;
   nilSpec?: boolean; // spec is "Nil" — any detected value is a breach
+  // Optional manual Six-Sigma control limits. When present they override
+  // the auto-computed μ±3σ limits on the control chart and capability stats.
+  uclOverride?: number;
+  lclOverride?: number;
 }
 
 export const DEFAULT_PARAMS: ParamSpec[] = [

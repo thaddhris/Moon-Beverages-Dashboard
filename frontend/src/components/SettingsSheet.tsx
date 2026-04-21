@@ -6,14 +6,15 @@ import { ParamSpec, DEFAULT_PARAMS, DEFAULT_SETTINGS } from "../lib/config";
 interface Props {
   open: boolean;
   onClose: () => void;
+  waterLabel?: string;
   params: ParamSpec[];
   settings: typeof DEFAULT_SETTINGS;
   onSave: (params: ParamSpec[], settings: typeof DEFAULT_SETTINGS) => void;
 }
 
-type Section = "limits" | "frequency" | "drift" | "shifts";
+type Section = "limits" | "control" | "frequency" | "drift" | "shifts";
 
-export function SettingsSheet({ open, onClose, params, settings, onSave }: Props) {
+export function SettingsSheet({ open, onClose, waterLabel, params, settings, onSave }: Props) {
   const [draftParams, setDraftParams] = useState(params);
   const [draftSettings, setDraftSettings] = useState(settings);
   const [section, setSection] = useState<Section>("limits");
@@ -35,54 +36,91 @@ export function SettingsSheet({ open, onClose, params, settings, onSave }: Props
     setDraftParams((prev) => prev.map((p) => (p.key === key ? { ...p, [field]: val } : p)));
   };
 
+  const updateParamOverride = (
+    key: string,
+    field: "uclOverride" | "lclOverride",
+    val: number | undefined
+  ) => {
+    setDraftParams((prev) =>
+      prev.map((p) => {
+        if (p.key !== key) return p;
+        const next = { ...p };
+        if (val === undefined || Number.isNaN(val)) delete next[field];
+        else next[field] = val;
+        return next;
+      })
+    );
+  };
+
   const resetParam = (key: string) => {
     const def = DEFAULT_PARAMS.find((p) => p.key === key)!;
     setDraftParams((prev) => prev.map((p) => (p.key === key ? { ...def } : p)));
   };
 
   const resetAll = () => {
-    if (confirm("Restore all settings to market standard? Your custom values will be lost.")) {
-      setDraftParams(DEFAULT_PARAMS);
-      setDraftSettings(DEFAULT_SETTINGS);
+    if (confirm(`Restore ${waterLabel ?? "all"} settings to market standard? Your custom values will be lost.`)) {
+      setDraftParams(DEFAULT_PARAMS.map((p) => ({ ...p })));
+      setDraftSettings({ ...DEFAULT_SETTINGS });
     }
   };
 
   const isInvalid = draftParams.some((p) => !p.nilSpec && p.min >= p.max);
 
+  const SECTIONS: { key: Section; label: string }[] = [
+    { key: "limits",    label: "Parameter Limits" },
+    { key: "control",   label: "Six Sigma Control Limits" },
+    { key: "frequency", label: "Check Frequency" },
+    { key: "drift",     label: "At Risk Thresholds" },
+    { key: "shifts",    label: "Shifts" },
+  ];
+
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-[480px] bg-[var(--surface)] shadow-2xl flex flex-col">
+      <div className="absolute right-0 top-0 h-full w-[540px] bg-[var(--surface)] shadow-2xl flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--hairline)]">
           <div>
-            <div className="text-[15px] font-medium">Settings</div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--ink-2)] font-medium">
+              Settings · {waterLabel ?? "Current Category"}
+            </div>
+            <div className="text-[15px] font-medium mt-0.5">{waterLabel ?? "Settings"}</div>
             {(() => {
               const changes = draftParams.filter((p) => {
                 const d = DEFAULT_PARAMS.find((x) => x.key === p.key)!;
-                return d.min !== p.min || d.max !== p.max || d.frequency !== p.frequency;
+                return (
+                  d.min !== p.min ||
+                  d.max !== p.max ||
+                  d.frequency !== p.frequency ||
+                  p.uclOverride !== undefined ||
+                  p.lclOverride !== undefined
+                );
               }).length;
               return changes > 0 ? (
-                <div className="text-[12px] text-[var(--ink-2)] mt-0.5">{changes} values customized</div>
+                <div className="text-[11px] text-[var(--ink-2)] mt-0.5">
+                  {changes} value{changes > 1 ? "s" : ""} customised · applies only to {waterLabel ?? "this category"}
+                </div>
               ) : (
-                <div className="text-[12px] text-[var(--ink-2)] mt-0.5">All values at market standard</div>
+                <div className="text-[11px] text-[var(--ink-2)] mt-0.5">
+                  All values at market standard · specific to {waterLabel ?? "this category"}
+                </div>
               );
             })()}
           </div>
           <button onClick={onClose} className="text-[var(--ink-2)] hover:text-[var(--ink)] text-lg">×</button>
         </div>
 
-        <div className="flex border-b border-[var(--hairline)] px-6">
-          {(["limits", "frequency", "drift", "shifts"] as Section[]).map((s) => (
+        <div className="flex border-b border-[var(--hairline)] px-6 overflow-x-auto">
+          {SECTIONS.map((s) => (
             <button
-              key={s}
-              onClick={() => setSection(s)}
-              className={`px-3 py-3 text-[12px] capitalize transition-colors ${
-                section === s
+              key={s.key}
+              onClick={() => setSection(s.key)}
+              className={`px-3 py-3 text-[12px] whitespace-nowrap transition-colors ${
+                section === s.key
                   ? "text-[var(--ink)] border-b-2 border-[var(--ink)] -mb-px"
                   : "text-[var(--ink-2)] hover:text-[var(--ink)]"
               }`}
             >
-              {s === "limits" ? "Parameter Limits" : s === "frequency" ? "Check Frequency" : s === "drift" ? "At Risk Thresholds" : "Shifts"}
+              {s.label}
             </button>
           ))}
         </div>
@@ -124,6 +162,67 @@ export function SettingsSheet({ open, onClose, params, settings, onSave }: Props
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {section === "control" && (
+            <div>
+              <div className="text-[11px] text-[var(--ink-2)] mb-3 leading-relaxed">
+                Enter a manual UCL / LCL to lock the control chart to a fixed band. Leave blank to auto-compute
+                from the data as <b>μ ± 3σ</b>.
+              </div>
+              <div className="grid grid-cols-[1fr_100px_100px_40px] gap-x-3 gap-y-1 items-center text-[10px] uppercase tracking-[0.08em] text-[var(--ink-2)] font-medium pb-2 border-b border-[var(--hairline)] mb-2">
+                <div>Parameter</div>
+                <div className="text-right">LCL</div>
+                <div className="text-right">UCL</div>
+                <div />
+              </div>
+              <div className="space-y-1">
+                {draftParams.map((p) => {
+                  const hasOverride = p.uclOverride !== undefined || p.lclOverride !== undefined;
+                  return (
+                    <div key={p.key} className="grid grid-cols-[1fr_100px_100px_40px] gap-x-3 items-center py-1">
+                      <div>
+                        <div className="text-[13px]">{p.label}</div>
+                        <div className="text-[10px] text-[var(--ink-2)]">
+                          Spec {p.min}–{p.max} {p.unit}
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="auto"
+                        value={p.lclOverride ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                          updateParamOverride(p.key, "lclOverride", v);
+                        }}
+                        className="w-full px-2 py-1 text-[13px] tnum text-right bg-[var(--bg)] rounded focus:outline-none"
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="auto"
+                        value={p.uclOverride ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value === "" ? undefined : parseFloat(e.target.value);
+                          updateParamOverride(p.key, "uclOverride", v);
+                        }}
+                        className="w-full px-2 py-1 text-[13px] tnum text-right bg-[var(--bg)] rounded focus:outline-none"
+                      />
+                      <button
+                        onClick={() => {
+                          updateParamOverride(p.key, "uclOverride", undefined);
+                          updateParamOverride(p.key, "lclOverride", undefined);
+                        }}
+                        className={`text-[11px] text-right ${hasOverride ? "text-[var(--ink-2)] hover:text-[var(--ink)]" : "invisible"}`}
+                      >
+                        clear
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -198,7 +297,7 @@ export function SettingsSheet({ open, onClose, params, settings, onSave }: Props
 
         <div className="border-t border-[var(--hairline)] px-6 py-4 flex items-center justify-between">
           <button onClick={resetAll} className="text-[12px] text-[var(--ink-2)] hover:text-[var(--ink)]">
-            Reset all to market standard
+            Reset {waterLabel ?? "all"} to market standard
           </button>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-3 py-1.5 text-[13px] text-[var(--ink-2)] hover:text-[var(--ink)]">
