@@ -1,4 +1,4 @@
-export type WaterType = "treated" | "raw" | "soap";
+export type WaterType = "treated" | "raw" | "soft";
 
 export interface WaterTypeConfig {
   key: WaterType;
@@ -8,7 +8,6 @@ export interface WaterTypeConfig {
   subtitle: string;
 }
 
-// All three currently use the same device — swap deviceId per type later.
 export const WATER_TYPES: WaterTypeConfig[] = [
   {
     key: "treated",
@@ -21,15 +20,15 @@ export const WATER_TYPES: WaterTypeConfig[] = [
     key: "raw",
     label: "Raw Water",
     shortLabel: "Raw",
-    deviceId: "TREATED_WATER_COLA",
+    deviceId: "RAW_WATER_COLA",
     subtitle: "Raw Water Analysis — Source Feed",
   },
   {
-    key: "soap",
-    label: "Soap Water",
-    shortLabel: "Soap",
-    deviceId: "TREATED_WATER_COLA",
-    subtitle: "Soap Water Analysis — CIP Rinse",
+    key: "soft",
+    label: "Soft Water",
+    shortLabel: "Soft",
+    deviceId: "SOFT_WATER_COLA",
+    subtitle: "Soft Water Analysis — Non-Chlorinated / Chlorinated",
   },
 ];
 

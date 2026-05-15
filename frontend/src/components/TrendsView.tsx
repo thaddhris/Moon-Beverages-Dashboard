@@ -222,7 +222,7 @@ export function TrendsView({ params, readings, bufferPct, timeRange, onSelectPar
           <div>
             <div className="label">Parameter</div>
             <div className="text-[16px] font-medium mt-0.5">{spec.label}</div>
-            <div className="text-[11px] text-[var(--ink-2)]">Limits {spec.min}–{spec.max} {spec.unit} · check every {spec.frequency}</div>
+            <div className="text-[11px] text-[var(--ink-2)]">Limits {spec.min}–{spec.max} {spec.unit} · check {{ "4h": "every 4 hours", "12h": "every 12 hours", "daily": "daily", "weekly": "weekly" }[spec.frequency]}</div>
           </div>
           <button
             onClick={() => onSelectParam(spec.key)}

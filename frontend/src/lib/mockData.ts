@@ -154,7 +154,239 @@ export function generateMockReadings(): Reading[] {
   return readings;
 }
 
+// ─── Raw Water mock readings ──────────────────────────────────────────────────
+// One reading per day at 08:00 UTC for all source-suffixed params.
+// Per-source offsets introduce realistic variation between borewell sources.
+export function generateRawWaterReadings(): Reading[] {
+  const rand = mulberry32(99);
+  const readings: Reading[] = [];
+  const days = 90;
+  const startDay = Math.floor(NOW_TS / DAY_MS) - days;
+
+  const sources = ["st", "bw1", "bw2", "bw3"] as const;
+  // per-source base offsets so each looks distinct
+  const srcOffset: Record<string, { pH: number; tds: number; th: number; turb: number }> = {
+    st:  { pH: 0,     tds: 0,   th: 0,   turb: 0    },
+    bw1: { pH: 0.15,  tds: 80,  th: 40,  turb: 0.5  },
+    bw2: { pH: -0.1,  tds: 120, th: 60,  turb: 0.8  },
+    bw3: { pH: 0.08,  tds: 200, th: 80,  turb: 0.3  },
+  };
+
+  for (let d = 0; d < days; d++) {
+    const dayStart = (startDay + d) * DAY_MS;
+    const ageDays = days - d;
+    const ts = dayStart + 8 * 3600 * 1000;
+    if (ts > NOW_TS) continue;
+
+    const values: Partial<Record<ParamKey, number>> = {};
+    const r = rand;
+
+    for (const src of sources) {
+      const off = srcOffset[src];
+
+      // pH
+      const pH = 7.1 + off.pH + Math.sin((ageDays * Math.PI) / 12) * 0.2 + (r() - 0.5) * 0.15;
+      (values as any)[`pH_${src}`] = parseFloat(Math.max(0, pH).toFixed(2));
+
+      // TDS — borewell sources higher than storage tank
+      const tds = 380 + off.tds + Math.cos((ageDays * Math.PI) / 7) * 60 + (r() - 0.5) * 30;
+      (values as any)[`tds_${src}`] = Math.round(Math.max(0, tds));
+
+      // Total Hardness
+      const th = 180 + off.th + Math.sin((ageDays * Math.PI) / 9) * 30 + (r() - 0.5) * 15;
+      const thVal = Math.round(Math.max(0, th));
+      (values as any)[`totalHardness_${src}`] = thVal;
+
+      // Ca Hardness — ~55% of total
+      (values as any)[`caHardness_${src}`] = Math.round(Math.max(0, thVal * 0.55 + (r() - 0.5) * 8));
+
+      // P Alkalinity — should be Nil
+      const pAlk = r() < 0.04 ? 0.03 + r() * 0.02 : 0;
+      (values as any)[`pAlkalinity_${src}`] = parseFloat(pAlk.toFixed(2));
+
+      // M Alkalinity
+      const mAlk = 200 + Math.sin((ageDays * Math.PI) / 6) * 50 + (r() - 0.5) * 20;
+      (values as any)[`mAlkalinity_${src}`] = Math.round(Math.max(0, mAlk));
+
+      // Turbidity
+      let turb = 0.5 + off.turb + r() * 0.8;
+      if (ageDays % 7 === 2) turb += 3 + r() * 2; // weekly spike
+      (values as any)[`turbidity_${src}`] = parseFloat(Math.max(0, turb).toFixed(1));
+
+      // Weekly params — iron, chloride, sulphate (included every day in mock so there's always data)
+      const iron = 0.08 + r() * 0.12;
+      (values as any)[`iron_${src}`] = parseFloat(Math.max(0, iron).toFixed(2));
+
+      const chloride = 80 + off.tds * 0.3 + Math.sin((ageDays * Math.PI) / 8) * 30 + (r() - 0.5) * 15;
+      (values as any)[`chloride_${src}`] = Math.round(Math.max(0, chloride));
+
+      const sulphate = 90 + off.tds * 0.2 + Math.cos((ageDays * Math.PI) / 10) * 35 + (r() - 0.5) * 15;
+      (values as any)[`sulphate_${src}`] = Math.round(Math.max(0, sulphate));
+    }
+
+    // CWT and FWT residual stages (daily) — same reading as main daily
+    const cwtOff = { pH: 0.2, tds: -80, th: -40, turb: -0.2 };
+    const fwtOff = { pH: 0.1, tds: -60, th: -30, turb: -0.15 };
+
+    for (const [sfx, off] of [["cwt", cwtOff], ["fwt", fwtOff]] as const) {
+      const pHv = 7.0 + off.pH + Math.sin((ageDays * Math.PI) / 14) * 0.15 + (r() - 0.5) * 0.1;
+      (values as any)[`pH_${sfx}`]            = parseFloat(Math.max(0, pHv).toFixed(2));
+      const tdsv = 300 + off.tds + Math.cos((ageDays * Math.PI) / 7) * 40 + (r() - 0.5) * 20;
+      (values as any)[`tds_${sfx}`]           = Math.round(Math.max(0, tdsv));
+      const thv = 140 + off.th + Math.sin((ageDays * Math.PI) / 9) * 25 + (r() - 0.5) * 12;
+      const thVal = Math.round(Math.max(0, thv));
+      (values as any)[`totalHardness_${sfx}`] = thVal;
+      (values as any)[`caHardness_${sfx}`]    = Math.round(Math.max(0, thVal * 0.55 + (r() - 0.5) * 6));
+      (values as any)[`pAlkalinity_${sfx}`]   = parseFloat((r() < 0.04 ? 0.02 + r() * 0.02 : 0).toFixed(2));
+      (values as any)[`mAlkalinity_${sfx}`]   = Math.round(Math.max(0, 160 + Math.sin((ageDays * Math.PI) / 6) * 40 + (r() - 0.5) * 15));
+      let turbv = 0.3 + off.turb + r() * 0.5;
+      if (ageDays % 7 === 2) turbv += 2 + r();
+      (values as any)[`turbidity_${sfx}`]     = parseFloat(Math.max(0, turbv).toFixed(1));
+      (values as any)[`residualCl_${sfx}`]    = parseFloat((2.5 + (r() - 0.5) * 0.8).toFixed(2));
+      (values as any)[`iron_${sfx}`]          = parseFloat(Math.max(0, 0.07 + r() * 0.1).toFixed(2));
+      (values as any)[`chloride_${sfx}`]      = Math.round(Math.max(0, 70 + (r() - 0.5) * 25));
+      (values as any)[`sulphate_${sfx}`]      = Math.round(Math.max(0, 80 + (r() - 0.5) * 25));
+    }
+
+    readings.push({
+      ts,
+      values,
+      sensory: { appearance: "Clear", odor: "Normal", taste: "Normal" },
+      shift: shiftFor(ts),
+      operator: OPERATORS[Math.floor(rand() * OPERATORS.length)],
+      qaExecutive: "V. Nair",
+      teamLeader: "S. Mehta",
+    });
+
+    // RWT Residual Cl₂ stage — 12h: first reading at 08:00 (already in ts above)
+    const rwtValues: Partial<Record<ParamKey, number>> = {};
+    const pHv = 7.1 + Math.sin((ageDays * Math.PI) / 12) * 0.18 + (rand() - 0.5) * 0.12;
+    rwtValues.pH_rwt            = parseFloat(Math.max(0, pHv).toFixed(2));
+    const tdsv = 360 + Math.cos((ageDays * Math.PI) / 7) * 50 + (rand() - 0.5) * 25;
+    rwtValues.tds_rwt           = Math.round(Math.max(0, tdsv));
+    const thv = 170 + Math.sin((ageDays * Math.PI) / 9) * 28 + (rand() - 0.5) * 12;
+    const thVal = Math.round(Math.max(0, thv));
+    rwtValues.totalHardness_rwt = thVal;
+    rwtValues.caHardness_rwt    = Math.round(Math.max(0, thVal * 0.55 + (rand() - 0.5) * 7));
+    rwtValues.pAlkalinity_rwt   = parseFloat((rand() < 0.04 ? 0.02 + rand() * 0.02 : 0).toFixed(2));
+    rwtValues.mAlkalinity_rwt   = Math.round(Math.max(0, 190 + Math.sin((ageDays * Math.PI) / 6) * 45 + (rand() - 0.5) * 18));
+    let turbv = 0.4 + rand() * 0.7;
+    if (ageDays % 7 === 2) turbv += 2.5 + rand();
+    rwtValues.turbidity_rwt     = parseFloat(Math.max(0, turbv).toFixed(1));
+    rwtValues.residualCl_rwt    = parseFloat((3.5 + (rand() - 0.5) * 0.6).toFixed(2));
+    rwtValues.iron_rwt          = parseFloat(Math.max(0, 0.08 + rand() * 0.1).toFixed(2));
+    rwtValues.chloride_rwt      = Math.round(Math.max(0, 75 + (rand() - 0.5) * 25));
+    rwtValues.sulphate_rwt      = Math.round(Math.max(0, 85 + (rand() - 0.5) * 25));
+
+    readings.push({
+      ts,
+      values: rwtValues,
+      sensory: { appearance: "Clear", odor: "Normal", taste: "Normal" },
+      shift: shiftFor(ts),
+      operator: OPERATORS[Math.floor(rand() * OPERATORS.length)],
+    });
+
+    // RWT second 12h reading at 20:00 UTC
+    const ts20 = dayStart + 20 * 3600 * 1000;
+    if (ts20 <= NOW_TS) {
+      const rv2: Partial<Record<ParamKey, number>> = {};
+      rv2.pH_rwt            = parseFloat(Math.max(0, 7.1 + (rand() - 0.5) * 0.15).toFixed(2));
+      rv2.tds_rwt           = Math.round(Math.max(0, 360 + (rand() - 0.5) * 30));
+      const th2 = Math.round(Math.max(0, 170 + (rand() - 0.5) * 15));
+      rv2.totalHardness_rwt = th2;
+      rv2.caHardness_rwt    = Math.round(Math.max(0, th2 * 0.55 + (rand() - 0.5) * 5));
+      rv2.pAlkalinity_rwt   = 0;
+      rv2.mAlkalinity_rwt   = Math.round(Math.max(0, 190 + (rand() - 0.5) * 20));
+      rv2.turbidity_rwt     = parseFloat(Math.max(0, 0.4 + rand() * 0.5).toFixed(1));
+      rv2.residualCl_rwt    = parseFloat((3.5 + (rand() - 0.5) * 0.6).toFixed(2));
+      readings.push({
+        ts: ts20,
+        values: rv2,
+        sensory: { appearance: "Clear", odor: "Normal", taste: "Normal" },
+        shift: shiftFor(ts20),
+        operator: OPERATORS[Math.floor(rand() * OPERATORS.length)],
+      });
+    }
+  }
+  return readings;
+}
+
+// ─── Soft Water mock readings ─────────────────────────────────────────────────
+// 4-hourly readings for NC / CH suffixed params; daily for chloride_* and iron_*.
+export function generateSoftWaterReadings(): Reading[] {
+  const rand = mulberry32(77);
+  const readings: Reading[] = [];
+  const days = 90;
+  const startDay = Math.floor(NOW_TS / DAY_MS) - days;
+
+  for (let d = 0; d < days; d++) {
+    const dayStart = (startDay + d) * DAY_MS;
+    const ageDays = days - d;
+
+    // ── 4-hourly ──
+    for (const h of SLOT_HOURS) {
+      const ts = dayStart + h * 3600 * 1000;
+      if (ts > NOW_TS) continue;
+      const values: Partial<Record<ParamKey, number>> = {};
+      const r = rand;
+
+      for (const sfx of ["nc", "ch"] as const) {
+        const chOffset = sfx === "ch" ? 0.1 : 0; // Chlorinated slightly higher pH
+        const pH = 7.3 + chOffset + Math.sin((h / 24) * 2 * Math.PI) * 0.1 + (r() - 0.5) * 0.12;
+        (values as any)[`pH_${sfx}`] = parseFloat(Math.max(0, pH).toFixed(2));
+
+        const tds = 160 + Math.sin((ageDays * Math.PI) / 5) * 30 + (r() - 0.5) * 20;
+        (values as any)[`tds_${sfx}`] = Math.round(Math.max(0, tds));
+
+        const th = 40 + Math.cos((ageDays * Math.PI) / 7) * 10 + (r() - 0.5) * 5;
+        const thVal = Math.round(Math.max(0, th));
+        (values as any)[`totalHardness_${sfx}`] = thVal;
+        (values as any)[`caHardness_${sfx}`] = Math.round(Math.max(0, thVal * 0.6 + (r() - 0.5) * 4));
+
+        const mAlk = 80 + Math.sin((ageDays * Math.PI) / 8) * 20 + (r() - 0.5) * 10;
+        (values as any)[`mAlkalinity_${sfx}`] = Math.round(Math.max(0, mAlk));
+
+        let turb = 0.1 + r() * 0.2;
+        if (ageDays % 7 === 1 && h === 0) turb = 0.9 + r() * 0.2;
+        (values as any)[`turbidity_${sfx}`] = parseFloat(Math.max(0, turb).toFixed(2));
+
+        const resCl = sfx === "ch" ? 0.15 + r() * 0.2 : 0.02 + r() * 0.05;
+        (values as any)[`residualCl_${sfx}`] = parseFloat(Math.max(0, resCl).toFixed(2));
+      }
+
+      readings.push({
+        ts,
+        values,
+        sensory: { appearance: "Clear", odor: "Normal", taste: "Normal" },
+        shift: shiftFor(ts),
+        operator: OPERATORS[Math.floor(r() * OPERATORS.length)],
+      });
+    }
+
+    // ── Daily ──
+    const dailyTs = dayStart + 8 * 3600 * 1000;
+    if (dailyTs <= NOW_TS) {
+      const values: Partial<Record<ParamKey, number>> = {};
+      const r = rand;
+      for (const sfx of ["nc", "ch"] as const) {
+        (values as any)[`chloride_${sfx}`] = Math.round(Math.max(0, 80 + (r() - 0.5) * 30));
+        (values as any)[`iron_${sfx}`] = parseFloat(Math.max(0, 0.03 + r() * 0.05).toFixed(2));
+      }
+      readings.push({
+        ts: dailyTs,
+        values,
+        sensory: { appearance: "Clear", odor: "Normal", taste: "Normal" },
+        shift: shiftFor(dailyTs),
+        operator: OPERATORS[Math.floor(rand() * OPERATORS.length)],
+      });
+    }
+  }
+  return readings;
+}
+
 export const MOCK_READINGS = generateMockReadings();
+export const RAW_WATER_READINGS  = generateRawWaterReadings();
+export const SOFT_WATER_READINGS = generateSoftWaterReadings();
 
 export function filterByRange(readings: Reading[], startTs: number, endTs: number): Reading[] {
   return readings.filter((r) => r.ts >= startTs && r.ts <= endTs);

@@ -237,7 +237,9 @@ export function SettingsSheet({ open, onClose, waterLabel, params, settings, onS
                     className="px-2 py-1 text-[13px] bg-[var(--bg)] rounded focus:outline-none"
                   >
                     <option value="4h">Every 4h</option>
+                    <option value="12h">Every 12h</option>
                     <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
                   </select>
                 </div>
               ))}

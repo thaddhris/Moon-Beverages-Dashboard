@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { ParamSpec } from "../lib/config";
-import { Reading, seriesFor, NOW_TS } from "../lib/mockData";
+import { Reading, seriesFor } from "../lib/mockData";
 import { Chart } from "./Chart";
-import { TimePicker, TimeRange, computePreset } from "./TimePicker";
+import { TimePicker, TimeRange } from "./TimePicker";
 import { fmtDateTimeIST, fmtDateIST, startOfIstDay, DAY_MS } from "../lib/ist";
 import { controlLimits, capability, ratingColor } from "../lib/sixsigma";
 import { slotStatusForDay, SLOTS, SlotStatus } from "../lib/slots";
@@ -13,40 +13,34 @@ interface Props {
   paramKey: string | null;
   params: ParamSpec[];
   readings: Reading[];
+  range: TimeRange;
+  onRangeChange: (r: TimeRange) => void;
   onClose: () => void;
 }
 
-const DEFAULT_DRAWER_RANGE: TimeRange = computePreset("previous7Days", NOW_TS);
-
-export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props) {
-  const [drawerRange, setDrawerRange] = useState<TimeRange>(DEFAULT_DRAWER_RANGE);
-
+export function ParamDetailDrawer({ paramKey, params, readings, range, onRangeChange, onClose }: Props) {
   useEffect(() => {
     const handle = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
   }, [onClose]);
 
-  useEffect(() => {
-    if (paramKey) setDrawerRange(DEFAULT_DRAWER_RANGE);
-  }, [paramKey]);
-
   const filtered = useMemo(
-    () => readings.filter((r) => r.ts >= drawerRange.startTs && r.ts <= drawerRange.endTs),
-    [readings, drawerRange]
+    () => readings.filter((r) => r.ts >= range.startTs && r.ts <= range.endTs),
+    [readings, range]
   );
 
   // Slot completion per day in the selected window — computed before any early
   // return so React sees the same hook order on every render.
   const dayBreakdown = useMemo(() => {
-    const startDay = startOfIstDay(drawerRange.startTs);
-    const endDay = startOfIstDay(drawerRange.endTs);
+    const startDay = startOfIstDay(range.startTs);
+    const endDay = startOfIstDay(range.endTs);
     const out: { dayTs: number; slots: ReturnType<typeof slotStatusForDay> }[] = [];
     for (let d = endDay; d >= startDay; d -= DAY_MS) {
       out.push({ dayTs: d, slots: slotStatusForDay(d, filtered) });
     }
     return out;
-  }, [filtered, drawerRange]);
+  }, [filtered, range]);
 
   if (!paramKey) return null;
   const spec = params.find((p) => p.key === paramKey);
@@ -153,7 +147,7 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
             <div className="text-[22px] font-medium mt-0.5">{spec.label}</div>
           </div>
           <div className="flex items-center gap-3 mt-1">
-            <TimePicker value={drawerRange} onChange={setDrawerRange} />
+            <TimePicker value={range} onChange={onRangeChange} />
             <button
               onClick={onClose}
               className="text-[var(--ink-2)] hover:text-[var(--ink)] text-2xl leading-none px-1"
@@ -227,14 +221,14 @@ export function ParamDetailDrawer({ paramKey, params, readings, onClose }: Props
 
           {/* Trend */}
           <div>
-            <div className="label mb-2">Trend · {drawerRange.label} · with Control Limits</div>
+            <div className="label mb-2">Trend · {range.label} · with Control Limits</div>
             <Chart options={trendOptions} />
           </div>
 
           {/* Slot completion */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <div className="label">Slot Completion · {drawerRange.label}</div>
+              <div className="label">Slot Completion · {range.label}</div>
               <div className="flex items-center gap-3 text-[10px] text-[var(--ink-2)]">
                 <LegendDot color="var(--ok)"     label="Filled" />
                 <LegendDot color="#3b82f6"       label="Multi" />

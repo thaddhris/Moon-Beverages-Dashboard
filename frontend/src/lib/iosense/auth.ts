@@ -71,7 +71,22 @@ export async function exchangeSSOToken(): Promise<AuthResult | null> {
 }
 
 export function clearAuth() {
+  if (typeof window === "undefined") return;
   localStorage.removeItem("bearer_token");
   localStorage.removeItem("iosense_org");
   localStorage.removeItem("iosense_user");
+}
+
+/**
+ * Manually store a JWT for testing or when SSO portal launch isn't available.
+ * Accepts a raw JWT or a "Bearer …" string and normalises to "Bearer eyJ…".
+ */
+export function setManualToken(jwt: string, organisation = "https://iosense.io"): AuthResult {
+  const trimmed = jwt.trim();
+  const bearer = trimmed.startsWith("Bearer ") ? trimmed : `Bearer ${trimmed}`;
+  if (typeof window !== "undefined") {
+    localStorage.setItem("bearer_token", bearer);
+    localStorage.setItem("iosense_org", organisation);
+  }
+  return { token: bearer, organisation, userId: "" };
 }
